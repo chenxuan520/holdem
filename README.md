@@ -84,3 +84,9 @@ npm run dev
 cd backend && go test ./...
 cd frontend && npm run build
 ```
+
+仓库已配置 GitHub Actions CI，会在 push / pull request 时自动执行：
+
+- `cd backend && go test ./...`
+- `cd frontend && npm run test`
+- `cd frontend && npm run build`

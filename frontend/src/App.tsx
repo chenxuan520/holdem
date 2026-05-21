@@ -64,15 +64,24 @@ export default function App() {
       return
     }
 
+    const refreshActiveMatch = () => {
+      void fetchMatch(activeMatchID)
+        .then((snapshot) => setMatch(snapshot))
+        .catch(() => {})
+    }
+
     const unsubscribe = subscribeMatchStream(
       activeMatchID,
       (event) => {
         setEvents((current) => (current.some((item) => item.sequence === event.sequence) ? current : [event, ...current]))
-        void fetchMatch(activeMatchID)
-          .then((snapshot) => setMatch(snapshot))
-          .catch(() => {})
+        refreshActiveMatch()
       },
-      setStreamStatus,
+      (status) => {
+        setStreamStatus(status)
+        if (status === 'connected') {
+          refreshActiveMatch()
+        }
+      },
     )
     return unsubscribe
   }, [activeMatchID])

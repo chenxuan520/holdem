@@ -212,6 +212,6 @@ describe('TableView', () => {
     expect(screen.getByText('本手赢家：AI A')).toBeInTheDocument()
     expect(screen.getByText('这一手已经摊牌，AI 的亮牌会显示在桌面座位上。看完结果后，点击“继续下一手”。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '继续下一手' })).toBeInTheDocument()
-    expect(screen.getByText('J♥')).toBeInTheDocument()
+    expect(screen.getAllByText((_, element) => element?.textContent === 'J♥').length).toBeGreaterThan(0)
   })
 })

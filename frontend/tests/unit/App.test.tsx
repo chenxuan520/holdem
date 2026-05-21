@@ -18,18 +18,25 @@ const apiMocks = vi.hoisted(() => ({
 
 const sseMocks = vi.hoisted(() => {
   let listener: ((event: any) => void) | null = null
+  let statusListener: ((status: 'connected' | 'disconnected') => void) | null = null
   return {
-    subscribeMatchStream: vi.fn((_matchID: string, onEvent: (event: any) => void) => {
+    subscribeMatchStream: vi.fn((_matchID: string, onEvent: (event: any) => void, onStatus?: (status: 'connected' | 'disconnected') => void) => {
       listener = onEvent
+      statusListener = onStatus ?? null
       return () => {
         listener = null
+        statusListener = null
       }
     }),
     emit(event: any) {
       listener?.(event)
     },
+    emitStatus(status: 'connected' | 'disconnected') {
+      statusListener?.(status)
+    },
     reset() {
       listener = null
+      statusListener = null
     },
   }
 })
@@ -308,5 +315,86 @@ describe('App flow', () => {
     await waitFor(() => expect(apiMocks.fetchMatch).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.getAllByText('Benchmark A').length).toBeGreaterThan(0))
     expect(sseMocks.subscribeMatchStream).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes the active match when SSE reconnects', async () => {
+    const createdAt = new Date().toISOString()
+    apiMocks.createMatch.mockResolvedValue({
+      id: 'match-reconnect',
+      status: 'hand_complete',
+      initialChips: 200,
+      smallBlind: 10,
+      bigBlind: 20,
+      players: [
+        { seat: 0, name: '你', chips: 230, isHuman: true, eliminated: false },
+        { seat: 1, name: 'AI B', chips: 170, isHuman: false, presetId: 'tight-shark', eliminated: false },
+      ],
+      table: {
+        handNumber: 1,
+        stage: 'river',
+        dealerSeat: 0,
+        smallBlindSeat: 0,
+        bigBlindSeat: 1,
+        currentTurnSeat: -1,
+        pot: 60,
+        board: ['As', 'Kd', '7c', '2s', '9h'],
+        heroCards: ['Qc', 'Qd'],
+        visibleHoleCards: [],
+        toCall: 0,
+        minimumRaiseTo: 0,
+        legalActions: [],
+        actionLog: [],
+        decisionLog: [],
+        lastWinners: ['你'],
+        completedHands: 1,
+      },
+      control: { spectatorMode: false, semiAutoMode: false, paused: false, manualMode: false, canStep: false, stopped: false, running: false },
+      createdAt,
+      updatedAt: createdAt,
+    })
+    apiMocks.fetchMatch.mockResolvedValue({
+      id: 'match-reconnect',
+      status: 'hand_complete',
+      initialChips: 200,
+      smallBlind: 10,
+      bigBlind: 20,
+      players: [
+        { seat: 0, name: '你', chips: 230, isHuman: true, eliminated: false },
+        { seat: 1, name: 'AI B', chips: 170, isHuman: false, presetId: 'tight-shark', eliminated: false },
+      ],
+      table: {
+        handNumber: 1,
+        stage: 'river',
+        dealerSeat: 0,
+        smallBlindSeat: 0,
+        bigBlindSeat: 1,
+        currentTurnSeat: -1,
+        pot: 60,
+        board: ['As', 'Kd', '7c', '2s', '9h'],
+        heroCards: ['Qc', 'Qd'],
+        visibleHoleCards: [{ seat: 1, playerName: 'AI B', cards: ['Jh', 'Td'] }],
+        toCall: 0,
+        minimumRaiseTo: 0,
+        legalActions: [],
+        actionLog: [],
+        decisionLog: [],
+        lastWinners: ['你'],
+        completedHands: 1,
+      },
+      control: { spectatorMode: false, semiAutoMode: false, paused: false, manualMode: false, canStep: false, stopped: false, running: false },
+      createdAt,
+      updatedAt: new Date().toISOString(),
+    })
+
+    render(<App />)
+
+    await screen.findByText('建桌设置')
+    await userEvent.click(screen.getByRole('button', { name: '开始一场新比赛' }))
+    await waitFor(() => expect(sseMocks.subscribeMatchStream).toHaveBeenCalledTimes(1))
+
+    sseMocks.emitStatus('connected')
+
+    await waitFor(() => expect(apiMocks.fetchMatch).toHaveBeenCalledTimes(1))
+    expect(screen.getAllByText((_, element) => element?.textContent === '10♦').length).toBeGreaterThan(0)
   })
 })

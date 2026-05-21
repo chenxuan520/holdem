@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { formatCard, isRedCard } from '../lib/cards'
+import { cardParts, isRedCard } from '../lib/cards'
 import type { ReplayDetail } from '../lib/types'
 
 type Props = {
@@ -72,7 +72,7 @@ export function ReplayView({ replay, loading }: Props) {
             <div className="board-row replay-board">
               {hand.board.map((card) => (
                 <div className="playing-card board" key={card}>
-                  <span className={isRedCard(card) ? 'card-face red' : 'card-face'}>{formatCard(card)}</span>
+                  <CardFace card={card} />
                 </div>
               ))}
             </div>
@@ -88,7 +88,7 @@ export function ReplayView({ replay, loading }: Props) {
                   <div className="hero-cards compact-cards">
                     {player.holeCards.map((card) => (
                       <div className="playing-card board" key={`${player.seat}-${card}`}>
-                        <span className={isRedCard(card) ? 'card-face red' : 'card-face'}>{formatCard(card)}</span>
+                        <CardFace card={card} />
                       </div>
                     ))}
                   </div>
@@ -130,6 +130,16 @@ export function ReplayView({ replay, loading }: Props) {
         ) : null}
       </section>
     </div>
+  )
+}
+
+function CardFace({ card }: { card: string }) {
+  const parts = cardParts(card)
+  return (
+    <span className={isRedCard(card) ? 'card-face red' : 'card-face'}>
+      <span className="card-rank">{parts.rank}</span>
+      <span className="card-suit">{parts.suit}</span>
+    </span>
   )
 }
 

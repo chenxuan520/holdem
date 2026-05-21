@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { formatCard, isRedCard } from '../lib/cards'
+import { cardParts, isRedCard } from '../lib/cards'
 import type { MatchSnapshot, StreamEvent } from '../lib/types'
 
 type Props = {
@@ -86,7 +86,7 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
               <div className="board-row center-board">
                 {[0, 1, 2, 3, 4].map((index) => (
                   <div className="playing-card board" key={index}>
-                    {boardCards[index] ? <span className={isRedCard(boardCards[index]) ? 'card-face red' : 'card-face'}>{formatCard(boardCards[index])}</span> : '—'}
+                    {boardCards[index] ? <CardFace card={boardCards[index]} /> : '—'}
                   </div>
                 ))}
               </div>
@@ -116,7 +116,7 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
                   <div className="seat-cards">
                     {(visibleCardsBySeat.get(player.seat) || []).map((card) => (
                       <span className="mini-card" key={`${player.seat}-${card}`}>
-                        <span className={isRedCard(card) ? 'card-face red' : 'card-face'}>{formatCard(card)}</span>
+                        <CardFace card={card} />
                       </span>
                     ))}
                   </div>
@@ -156,7 +156,7 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
               {hasHumanPlayer ? (
                 heroCards.map((card) => (
                   <div className="playing-card hero" key={card}>
-                    <span className={isRedCard(card) ? 'card-face red' : 'card-face'}>{formatCard(card)}</span>
+                    <CardFace card={card} />
                   </div>
                 ))
               ) : (
@@ -310,6 +310,16 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
         </div>
       </aside>
     </div>
+  )
+}
+
+function CardFace({ card }: { card: string }) {
+  const parts = cardParts(card)
+  return (
+    <span className={isRedCard(card) ? 'card-face red' : 'card-face'}>
+      <span className="card-rank">{parts.rank}</span>
+      <span className="card-suit">{parts.suit}</span>
+    </span>
   )
 }
 

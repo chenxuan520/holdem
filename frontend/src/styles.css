@@ -619,6 +619,40 @@ select {
   box-shadow: 0 16px 26px rgba(0, 0, 0, 0.18);
 }
 
+.card-face {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  max-width: 100%;
+  margin: 0 auto;
+  line-height: 1;
+  white-space: nowrap;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  row-gap: 0.08em;
+}
+
+.card-rank {
+  display: block;
+}
+
+.card-suit {
+  display: block;
+  font-size: 0.9em;
+}
+
+.mini-card .card-face {
+	flex-direction: row;
+	row-gap: 0;
+	column-gap: 0.08em;
+}
+
+.mini-card .card-suit {
+	font-size: 1em;
+}
+
 .card-face.red {
   color: #e5484d;
 }

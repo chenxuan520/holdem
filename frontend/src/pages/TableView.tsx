@@ -40,6 +40,7 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
   const dealerPlayer = match.players.find((player) => player.seat === match.table.dealerSeat)
   const currentActor = match.players.find((player) => player.seat === match.table.currentTurnSeat)
   const turnStatus = describeTurnStatus(match, spectatorMode, currentActor?.name ?? null)
+  const lifecycleStatus = describeLifecycleStatus(match)
 
   useEffect(() => {
     setRaiseAmount(match.table.minimumRaiseTo || 0)
@@ -58,9 +59,15 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
             <strong>比赛 #{match.id}</strong>
             <span>{new Date(match.createdAt).toLocaleString('zh-CN')}</span>
           </div>
-          <div className="table-meta-pills">
-            <span className="status-pill">第 {match.table.handNumber} 手</span>
-            <span className="status-pill">已完成 {match.table.completedHands} 手</span>
+          <div className="match-summary-actions">
+            <div className="table-meta-pills">
+              <span className={`status-pill ${lifecycleStatus.tone}`}>牌桌 {lifecycleStatus.label}</span>
+              <span className="status-pill">第 {match.table.handNumber} 手</span>
+              <span className="status-pill">已完成 {match.table.completedHands} 手</span>
+            </div>
+            <button className="danger-button inline" onClick={() => onControl('stop')} type="button" disabled={match.status === 'finished' || match.status === 'stopped'}>
+              终止牌桌
+            </button>
           </div>
         </div>
 
@@ -124,14 +131,20 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
             <button className="ghost-button" onClick={() => onControl(match.control?.paused ? 'continue' : 'pause')} type="button" disabled={match.status === 'finished' || match.status === 'stopped'}>
               {match.control?.paused ? '继续' : '暂停'}
             </button>
-            <button className={`ghost-button ${match.control?.manualMode ? 'is-active' : ''}`} onClick={() => onControl(match.control?.manualMode ? 'manual_off' : 'manual_on')} type="button" disabled={match.status === 'finished' || match.status === 'stopped'}>
-              {match.control?.manualMode ? '退出手动模式' : '手动模式'}
+            <button className={`ghost-button ${match.control?.semiAutoMode ? 'is-active' : ''}`} onClick={() => onControl('semi_auto_on')} type="button" disabled={match.status === 'finished' || match.status === 'stopped'}>
+              半自动
+            </button>
+            <button className={`ghost-button ${!match.control?.semiAutoMode && !match.control?.manualMode ? 'is-active' : ''}`} onClick={() => onControl('auto_on')} type="button" disabled={match.status === 'finished' || match.status === 'stopped'}>
+              全自动
+            </button>
+            <button className={`ghost-button ${match.control?.manualMode ? 'is-active' : ''}`} onClick={() => onControl('manual_on')} type="button" disabled={match.status === 'finished' || match.status === 'stopped'}>
+              手动模式
             </button>
             <button className="primary-button inline" onClick={() => onControl('step')} type="button" disabled={!match.control?.manualMode || match.status === 'finished' || match.status === 'stopped'}>
               下一步
             </button>
-            <button className="danger-button" onClick={() => onControl('stop')} type="button" disabled={match.status === 'finished' || match.status === 'stopped'}>
-              终止
+            <button className="primary-button inline" onClick={() => onControl('continue')} type="button" disabled={match.status !== 'hand_complete'}>
+              继续下一手
             </button>
           </div>
         ) : null}
@@ -148,8 +161,8 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
                 ))
               ) : (
                 <div className="spectator-note">
-                  <strong>纯 AI 自动对战中</strong>
-                  <p>当前桌面没有真人座位，系统会自动推进所有 AI 行动，你只需要旁观和回放。</p>
+                  <strong>{match.control?.manualMode ? '纯 AI 手动逐步观战中' : match.control?.semiAutoMode ? '纯 AI 半自动观战中' : '纯 AI 自动对战中'}</strong>
+                  <p>{match.control?.manualMode ? '当前会在每次 AI 决策前停下，需要你点“下一步”才会继续。' : match.control?.semiAutoMode ? '当前会把这一手自动打完，但在分出赢家后停下，等待你继续下一手。' : '当前桌面没有真人座位，系统会自动推进所有 AI 行动，你只需要旁观和回放。'} </p>
                 </div>
               )}
             </div>
@@ -190,8 +203,15 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
               </div>
             ) : null}
 
-            {!hasHumanPlayer ? <span className="action-hint">系统会自动推进到下一手或比赛结束。</span> : null}
-            {hasHumanPlayer && legalActions.length === 0 ? <span className="action-hint">当前等待 AI 行动或手牌结算。</span> : null}
+            {!hasHumanPlayer ? <span className="action-hint">{match.control?.manualMode ? '当前是手动逐步观战：每次 AI 决策都要你点“下一步”。' : match.control?.semiAutoMode ? '当前是半自动观战：每手分出赢家后会停下，等你点“继续下一手”。' : '系统会自动推进到下一手或比赛结束。'} </span> : null}
+            {hasHumanPlayer && match.status === 'hand_complete' ? (
+              <div className="raise-box">
+                <button className="primary-button inline" onClick={() => onControl('continue')} type="button">
+                  继续下一手
+                </button>
+              </div>
+            ) : null}
+            {hasHumanPlayer && legalActions.length === 0 && match.status !== 'hand_complete' ? <span className="action-hint">当前等待 AI 行动或手牌结算。</span> : null}
           </div>
         </div>
 
@@ -321,6 +341,24 @@ function describeTurnStatus(match: MatchSnapshot, spectatorMode: boolean, curren
     }
   }
 
+  if (spectatorMode && match.control?.semiAutoMode && match.status === 'hand_complete') {
+    return {
+      label: '半自动停点',
+      title: match.table.lastWinners?.length ? `本手赢家：${match.table.lastWinners.join(' / ')}` : '本手已经结束',
+      detail: (match.table.visibleHoleCards?.length ?? 0) > 0 ? '这一手已经摊牌，亮出的手牌会显示在桌面座位上。点击“继续下一手”后，系统才会开始下一手。' : '这一手已经分出赢家。点击“继续下一手”后，系统才会开始下一手。',
+      tone: 'semi',
+    }
+  }
+
+  if (match.status === 'hand_complete') {
+    return {
+      label: '本手结束',
+      title: match.table.lastWinners?.length ? `本手赢家：${match.table.lastWinners.join(' / ')}` : '本手已经结束',
+      detail: (match.table.visibleHoleCards?.length ?? 0) > 0 ? '这一手已经摊牌，AI 的亮牌会显示在桌面座位上。看完结果后，点击“继续下一手”。' : '这一手已经分出赢家。看完结果后，点击“继续下一手”开始下一轮。',
+      tone: 'semi',
+    }
+  }
+
   if (spectatorMode && match.control?.manualMode && !match.control?.running) {
     return {
       label: '手动模式',
@@ -343,7 +381,7 @@ function describeTurnStatus(match: MatchSnapshot, spectatorMode: boolean, curren
     return {
       label: '等待 AI',
       title: currentActorName ? `正在等待 ${currentActorName} 操作` : '正在等待 AI 操作',
-      detail: spectatorMode ? '系统正在请求 AI 决策；如果没暂停，它会自动继续。' : '系统正在请求 AI 决策，这时不是卡死。',
+      detail: spectatorMode ? match.control?.semiAutoMode ? '系统正在打这一手；等这一手分出赢家后会自动停下。' : '系统正在请求 AI 决策；如果没暂停，它会自动继续。': '系统正在请求 AI 决策。',
       tone: 'ai',
     }
   }
@@ -354,6 +392,19 @@ function describeTurnStatus(match: MatchSnapshot, spectatorMode: boolean, curren
     detail: '可能正在发公共牌、结算底池，或者切换到下一手。',
     tone: 'progress',
   }
+}
+
+function describeLifecycleStatus(match: MatchSnapshot) {
+  if (match.status === 'stopped' || match.control?.stopped) {
+    return { label: '已终止', tone: 'stopped' }
+  }
+  if (match.status === 'finished') {
+    return { label: '已结束', tone: 'finished' }
+  }
+  if (match.control?.paused || match.status === 'hand_complete' || (match.control?.manualMode && !match.control?.running)) {
+    return { label: '已暂停', tone: 'paused' }
+  }
+  return { label: '进行中', tone: 'running' }
 }
 
 function seatLayout(count: number) {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { clearReplays, controlMatch, createMatch, deleteReplay, fetchMatch, fetchPresets, fetchReplay, fetchReplays, submitAction } from './lib/api'
+import { clearRecords, controlMatch, createMatch, deleteRecord, fetchMatch, fetchPresets, fetchRecords, fetchReplay, submitAction } from './lib/api'
 import { subscribeMatchStream } from './lib/sse'
-import type { MatchSnapshot, Preset, ReplayDetail, ReplaySummary, StreamEvent } from './lib/types'
+import type { MatchSnapshot, Preset, RecordSummary, ReplayDetail, StreamEvent } from './lib/types'
 import { HistoryView } from './pages/HistoryView'
 import { LobbyView } from './pages/LobbyView'
 import { ReplayView } from './pages/ReplayView'
@@ -12,6 +12,7 @@ const DEFAULT_SMALL_BLIND = 10
 const DEFAULT_BIG_BLIND = 20
 
 type View = 'lobby' | 'table' | 'history' | 'replay'
+type SpectatorRunMode = 'semi' | 'auto' | 'manual'
 
 export default function App() {
   const [view, setView] = useState<View>('lobby')
@@ -23,7 +24,7 @@ export default function App() {
   const [smallBlind, setSmallBlind] = useState(DEFAULT_SMALL_BLIND)
   const [bigBlind, setBigBlind] = useState(DEFAULT_BIG_BLIND)
   const [spectatorMode, setSpectatorMode] = useState(false)
-  const [startManualMode, setStartManualMode] = useState(false)
+  const [spectatorRunMode, setSpectatorRunMode] = useState<SpectatorRunMode>('semi')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -31,12 +32,12 @@ export default function App() {
   const [events, setEvents] = useState<StreamEvent[]>([])
   const [streamStatus, setStreamStatus] = useState<'connected' | 'disconnected'>('disconnected')
   const [actionPending, setActionPending] = useState(false)
-  const [replays, setReplays] = useState<ReplaySummary[]>([])
-  const [replaysLoading, setReplaysLoading] = useState(false)
+  const [records, setRecords] = useState<RecordSummary[]>([])
+  const [recordsLoading, setRecordsLoading] = useState(false)
   const [replay, setReplay] = useState<ReplayDetail | null>(null)
   const [replayLoading, setReplayLoading] = useState(false)
-  const [deletingReplayID, setDeletingReplayID] = useState<string | null>(null)
-  const [clearingReplays, setClearingReplays] = useState(false)
+  const [deletingRecordID, setDeletingRecordID] = useState<string | null>(null)
+  const [clearingRecords, setClearingRecords] = useState(false)
   const activeMatchID = match?.id ?? null
 
   useEffect(() => {
@@ -78,54 +79,60 @@ export default function App() {
 
   useEffect(() => {
     if (view !== 'history') return
-    void loadReplays()
+    void loadRecords()
   }, [view])
 
-  async function loadReplays() {
-    setReplaysLoading(true)
+  async function loadRecords() {
+    setRecordsLoading(true)
     try {
-      setReplays(await fetchReplays())
+      setRecords(await fetchRecords())
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载历史失败')
+      setError(err instanceof Error ? err.message : '加载记录失败')
     } finally {
-      setReplaysLoading(false)
+      setRecordsLoading(false)
     }
   }
 
-  async function handleRefreshReplays() {
+  async function handleRefreshRecords() {
     setError(null)
-    await loadReplays()
+    await loadRecords()
   }
 
-  async function handleDeleteReplay(id: string) {
-    if (!window.confirm(`确认删除历史回放 ${id} 吗？`)) return
-    setDeletingReplayID(id)
+  async function handleDeleteRecord(id: string) {
+    if (!window.confirm(`确认删除对局记录 ${id} 吗？`)) return
+    setDeletingRecordID(id)
     setError(null)
     try {
-      await deleteReplay(id)
-      setReplays((current) => current.filter((item) => item.id !== id))
+      await deleteRecord(id)
+      setRecords((current) => current.filter((item) => item.id !== id))
+      if (match?.id === id) {
+        setMatch(null)
+        setEvents([])
+      }
       if (replay?.summary.id === id) {
         setReplay(null)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除回放失败')
+      setError(err instanceof Error ? err.message : '删除记录失败')
     } finally {
-      setDeletingReplayID(null)
+      setDeletingRecordID(null)
     }
   }
 
-  async function handleClearReplays() {
-    if (!window.confirm('确认清空所有历史回放吗？这个操作不可撤销。')) return
-    setClearingReplays(true)
+  async function handleClearRecords() {
+    if (!window.confirm('确认清空所有对局记录吗？这个操作不可撤销。')) return
+    setClearingRecords(true)
     setError(null)
     try {
-      await clearReplays()
-      setReplays([])
+      await clearRecords()
+      setRecords([])
+      setMatch(null)
+      setEvents([])
       setReplay(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '清空历史失败')
+      setError(err instanceof Error ? err.message : '清空记录失败')
     } finally {
-      setClearingReplays(false)
+      setClearingRecords(false)
     }
   }
 
@@ -141,7 +148,8 @@ export default function App() {
         aiPlayerNames,
         humanName,
         spectatorMode,
-        manualMode: spectatorMode && startManualMode,
+        semiAutoMode: spectatorMode && spectatorRunMode === 'semi',
+        manualMode: spectatorMode && spectatorRunMode === 'manual',
       })
       setMatch(snapshot)
       setEvents(snapshot.lastEvent ? [snapshot.lastEvent] : [])
@@ -161,7 +169,7 @@ export default function App() {
       const snapshot = await submitAction(match.id, { action, amount })
       setMatch(snapshot)
       if (snapshot.status === 'finished') {
-        await loadReplays()
+        await loadRecords()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '提交动作失败')
@@ -176,8 +184,8 @@ export default function App() {
     try {
       const snapshot = await controlMatch(match.id, action)
       setMatch(snapshot)
-      if (snapshot.status === 'finished') {
-        await loadReplays()
+      if (snapshot.status === 'finished' || snapshot.status === 'stopped') {
+        await loadRecords()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '控制比赛失败')
@@ -198,11 +206,28 @@ export default function App() {
     }
   }
 
+  async function openRecord(item: RecordSummary) {
+    setError(null)
+    if (item.continueAvailable) {
+      try {
+        const snapshot = await fetchMatch(item.id)
+        setMatch(snapshot)
+        setEvents(snapshot.lastEvent ? [snapshot.lastEvent] : [])
+        setView('table')
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '回桌失败')
+      }
+      return
+    }
+    await openReplay(item.id)
+  }
+
   function handleAddSeat() {
-    if (!presets[0]) return
+    const nextPreset = pickNextDefaultPreset(presets, selectedAI)
+    if (!nextPreset) return
     if (selectedAI.length >= (spectatorMode ? 6 : 5)) return
-    setSelectedAI((current) => [...current, presets[0].id])
-    setAIPlayerNames((current) => [...current, nextDefaultAIName(presets[0].name, current)])
+    setSelectedAI((current) => [...current, nextPreset.id])
+    setAIPlayerNames((current) => [...current, nextDefaultAIName(nextPreset.name, current)])
   }
 
   function handleRemoveSeat(index: number) {
@@ -228,7 +253,7 @@ export default function App() {
             <div className="brand-mark">♠</div>
             <div>
               <strong>Holdem AI Battle</strong>
-              <span>Benchmark Console</span>
+              <span>对战 · 观战 · 回放</span>
             </div>
           </div>
 
@@ -239,7 +264,7 @@ export default function App() {
             当前牌桌
           </button>
           <button className={`nav-pill ${view === 'history' ? 'active' : ''}`} onClick={() => setView('history')} type="button">
-            历史回放
+            牌桌记录
           </button>
           <button className={`nav-pill ${view === 'replay' ? 'active' : ''}`} onClick={() => setView('replay')} type="button" disabled={!replay}>
             回放详情
@@ -263,7 +288,7 @@ export default function App() {
             smallBlind={smallBlind}
             bigBlind={bigBlind}
             spectatorMode={spectatorMode}
-            startManualMode={startManualMode}
+            spectatorRunMode={spectatorRunMode}
             loading={loading}
             creating={creating}
             error={null}
@@ -271,28 +296,27 @@ export default function App() {
             onInitialChipsChange={setInitialChips}
             onSmallBlindChange={setSmallBlind}
             onBigBlindChange={setBigBlind}
-            onStartManualModeChange={setStartManualMode}
+            onSpectatorRunModeChange={setSpectatorRunMode}
             onSpectatorModeChange={(value) => {
               setSpectatorMode(value)
               if (!value) {
-                setStartManualMode(false)
+                setSpectatorRunMode('semi')
               }
-              setSelectedAI((current) => {
-                const next = [...current]
-                if (value) {
-                  while (next.length < 2 && presets[0]) next.push(presets[0].id)
-                  return next.slice(0, 6)
+              const nextSelectedAI = [...selectedAI]
+              const nextAIPlayerNames = [...aiPlayerNames]
+              if (value) {
+                while (nextSelectedAI.length < 2) {
+                  const nextPreset = pickNextDefaultPreset(presets, nextSelectedAI)
+                  if (!nextPreset) break
+                  nextSelectedAI.push(nextPreset.id)
+                  nextAIPlayerNames.push(nextDefaultAIName(nextPreset.name, nextAIPlayerNames))
                 }
-                return next.slice(0, 5)
-              })
-              setAIPlayerNames((current) => {
-                const next = [...current]
-                if (value) {
-                  while (next.length < 2 && presets[0]) next.push(nextDefaultAIName(presets[0].name, next))
-                  return next.slice(0, 6)
-                }
-                return next.slice(0, 5)
-              })
+                setSelectedAI(nextSelectedAI.slice(0, 6))
+                setAIPlayerNames(nextAIPlayerNames.slice(0, 6))
+                return
+              }
+              setSelectedAI(nextSelectedAI.slice(0, 5))
+              setAIPlayerNames(nextAIPlayerNames.slice(0, 5))
             }}
             onAddSeat={handleAddSeat}
             onUpdatePreset={(index, value) =>
@@ -310,14 +334,14 @@ export default function App() {
 
         {view === 'history' ? (
           <HistoryView
-            items={replays}
-            loading={replaysLoading}
-            deletingID={deletingReplayID}
-            clearingAll={clearingReplays}
-            onOpen={openReplay}
-            onRefresh={handleRefreshReplays}
-            onDelete={handleDeleteReplay}
-            onClear={handleClearReplays}
+            items={records}
+            loading={recordsLoading}
+            deletingID={deletingRecordID}
+            clearingAll={clearingRecords}
+            onOpen={openRecord}
+            onRefresh={handleRefreshRecords}
+            onDelete={handleDeleteRecord}
+            onClear={handleClearRecords}
           />
         ) : null}
 
@@ -335,4 +359,31 @@ function nextDefaultAIName(baseName: string, currentNames: string[]) {
     index += 1
   }
   return `${trimmed} ${index}`
+}
+
+function pickNextDefaultPreset(presets: Preset[], currentPresetIDs: string[]) {
+  if (presets.length === 0) return null
+
+  const counts = new Map<string, number>()
+  for (const id of currentPresetIDs) {
+    counts.set(id, (counts.get(id) ?? 0) + 1)
+  }
+
+  for (const preset of presets) {
+    if (!counts.has(preset.id)) {
+      return preset
+    }
+  }
+
+  let bestPreset = presets[0]
+  let bestCount = counts.get(bestPreset.id) ?? 0
+  for (const preset of presets.slice(1)) {
+    const count = counts.get(preset.id) ?? 0
+    if (count < bestCount) {
+      bestPreset = preset
+      bestCount = count
+    }
+  }
+
+  return bestPreset
 }

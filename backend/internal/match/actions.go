@@ -23,7 +23,10 @@ func (s *Service) ApplyHeroAction(id string, req PlayerActionRequest) (Snapshot,
 }
 
 func (s *Service) runUntilPause(id string, snapshot Snapshot) (Snapshot, error) {
+	iterations := 0
+	aiRequests := 0
 	for {
+		iterations++
 		s.mu.RLock()
 		current, ok := s.matches[id]
 		hidden := s.hidden[id]
@@ -35,6 +38,13 @@ func (s *Service) runUntilPause(id string, snapshot Snapshot) (Snapshot, error) 
 			if current.Control.Stopped || current.Status == "stopped" {
 				s.mu.RUnlock()
 				return current, nil
+			}
+			if shouldPauseAfterHand(current) {
+				if !current.Control.CanStep {
+					s.mu.RUnlock()
+					return current, nil
+				}
+				consumeStep = true
 			}
 			heroSeat = humanSeat(current.Players)
 			seat := hidden.hand.CurrentTurnSeat
@@ -64,6 +74,9 @@ func (s *Service) runUntilPause(id string, snapshot Snapshot) (Snapshot, error) 
 		if !ok {
 			return Snapshot{}, fmt.Errorf("match not found")
 		}
+		if iterations > 2048 {
+			return current, fmt.Errorf("safety stop: too many state transitions in one run")
+		}
 		if current.Status == "finished" || current.Status == "awaiting_human" {
 			return current, nil
 		}
@@ -79,9 +92,13 @@ func (s *Service) runUntilPause(id string, snapshot Snapshot) (Snapshot, error) 
 		}
 
 		preset := s.presets[presetID]
+		aiRequests++
+		if aiRequests > 256 {
+			return current, fmt.Errorf("safety stop: too many ai decisions in one run")
+		}
 		decision, logEntry, err := s.ai.Decide(context.Background(), preset, input)
 		if err != nil {
-			decision = fallbackDecision(current, hidden.hand, input.Seat)
+			decision = requestFailureDecision()
 			logEntry.Error = err.Error()
 		}
 
@@ -92,6 +109,16 @@ func (s *Service) runUntilPause(id string, snapshot Snapshot) (Snapshot, error) 
 		s.publishPending(id, pending)
 		snapshot = nextSnapshot
 	}
+}
+
+func shouldPauseAfterHand(snapshot Snapshot) bool {
+	if snapshot.Status != "hand_complete" {
+		return false
+	}
+	if hasHuman(snapshot.Players) {
+		return true
+	}
+	return snapshot.Control.SemiAutoMode || snapshot.Control.ManualMode || snapshot.Control.Paused
 }
 
 func (s *Service) clearStepPermission(id string) {

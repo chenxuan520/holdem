@@ -5,12 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../../src/App'
 
 const apiMocks = vi.hoisted(() => ({
-  clearReplays: vi.fn(),
+  clearRecords: vi.fn(),
   controlMatch: vi.fn(),
   fetchPresets: vi.fn(),
   createMatch: vi.fn(),
-  deleteReplay: vi.fn(),
-  fetchReplays: vi.fn(),
+  deleteRecord: vi.fn(),
+  fetchRecords: vi.fn(),
   fetchReplay: vi.fn(),
   fetchMatch: vi.fn(),
   submitAction: vi.fn(),
@@ -35,12 +35,12 @@ const sseMocks = vi.hoisted(() => {
 })
 
 vi.mock('../../src/lib/api', () => ({
-  clearReplays: apiMocks.clearReplays,
+  clearRecords: apiMocks.clearRecords,
   controlMatch: apiMocks.controlMatch,
   fetchPresets: apiMocks.fetchPresets,
   createMatch: apiMocks.createMatch,
-  deleteReplay: apiMocks.deleteReplay,
-  fetchReplays: apiMocks.fetchReplays,
+  deleteRecord: apiMocks.deleteRecord,
+  fetchRecords: apiMocks.fetchRecords,
   fetchReplay: apiMocks.fetchReplay,
   fetchMatch: apiMocks.fetchMatch,
   submitAction: apiMocks.submitAction,
@@ -57,10 +57,10 @@ describe('App flow', () => {
     apiMocks.fetchPresets.mockResolvedValue([
       { id: 'tight-shark', name: 'Benchmark A', endpoint: 'https://api.deepseek.com', model: 'deepseek-v4-flash', systemPrompt: 'benchmark' },
     ])
-    apiMocks.clearReplays.mockResolvedValue(null)
+    apiMocks.clearRecords.mockResolvedValue(null)
     apiMocks.controlMatch.mockResolvedValue(null)
-    apiMocks.deleteReplay.mockResolvedValue(null)
-    apiMocks.fetchReplays.mockResolvedValue([])
+    apiMocks.deleteRecord.mockResolvedValue(null)
+    apiMocks.fetchRecords.mockResolvedValue([])
     apiMocks.fetchReplay.mockResolvedValue(null)
     apiMocks.fetchMatch.mockResolvedValue(null)
     apiMocks.submitAction.mockResolvedValue(null)
@@ -95,7 +95,7 @@ describe('App flow', () => {
           decisionLog: [],
           completedHands: 0,
         },
-        control: { spectatorMode: false, paused: false, manualMode: false, canStep: false, stopped: false, running: false },
+        control: { spectatorMode: false, semiAutoMode: false, paused: false, manualMode: false, canStep: false, stopped: false, running: false },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         lastEvent: undefined,
@@ -141,7 +141,7 @@ describe('App flow', () => {
           decisionLog: [],
           completedHands: 0,
         },
-        control: { spectatorMode: true, paused: false, manualMode: false, canStep: false, stopped: false, running: true },
+        control: { spectatorMode: true, semiAutoMode: true, paused: false, manualMode: false, canStep: false, stopped: false, running: true },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         lastEvent: undefined,
@@ -155,6 +155,7 @@ describe('App flow', () => {
 
     await waitFor(() => expect(apiMocks.createMatch).toHaveBeenCalled())
     expect(apiMocks.createMatch.mock.calls[0][0].spectatorMode).toBe(true)
+    expect(apiMocks.createMatch.mock.calls[0][0].semiAutoMode).toBe(true)
     expect(apiMocks.createMatch.mock.calls[0][0].manualMode).toBe(false)
   })
 
@@ -187,7 +188,7 @@ describe('App flow', () => {
         decisionLog: [],
         completedHands: 0,
       },
-      control: { spectatorMode: false, paused: false, manualMode: false, canStep: false, stopped: false, running: false },
+      control: { spectatorMode: false, semiAutoMode: false, paused: false, manualMode: false, canStep: false, stopped: false, running: false },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })
@@ -204,6 +205,23 @@ describe('App flow', () => {
     await waitFor(() => expect(apiMocks.createMatch).toHaveBeenCalled())
     expect(apiMocks.createMatch.mock.calls[0][0].humanName).toBe('主播')
     expect(apiMocks.createMatch.mock.calls[0][0].aiPlayerNames).toEqual(['老鲨鱼'])
+  })
+
+  it('prefers the next preset instead of duplicating A when adding a new AI seat', async () => {
+    apiMocks.fetchPresets.mockResolvedValue([
+      { id: 'a', name: 'Benchmark A', endpoint: 'https://api.deepseek.com', model: 'deepseek-v4-flash', systemPrompt: 'benchmark' },
+      { id: 'b', name: 'Benchmark B', endpoint: 'https://api.deepseek.com', model: 'deepseek-v4-flash', systemPrompt: 'benchmark' },
+      { id: 'c', name: 'Benchmark C', endpoint: 'https://api.deepseek.com', model: 'deepseek-v4-flash', systemPrompt: 'benchmark' },
+    ])
+
+    render(<App />)
+
+    await screen.findByText('建桌设置')
+    await userEvent.click(screen.getByRole('button', { name: '+ 添加 AI' }))
+
+    expect(screen.getByDisplayValue('Benchmark A')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Benchmark B')).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('Benchmark A 2')).not.toBeInTheDocument()
   })
 
   it('keeps a single SSE subscription while the same match snapshot updates', async () => {
@@ -236,7 +254,7 @@ describe('App flow', () => {
         decisionLog: [],
         completedHands: 0,
       },
-      control: { spectatorMode: false, paused: false, manualMode: false, canStep: false, stopped: false, running: false },
+      control: { spectatorMode: false, semiAutoMode: false, paused: false, manualMode: false, canStep: false, stopped: false, running: false },
       createdAt,
       updatedAt: createdAt,
     })
@@ -268,7 +286,7 @@ describe('App flow', () => {
         decisionLog: [],
         completedHands: 0,
       },
-      control: { spectatorMode: false, paused: false, manualMode: false, canStep: false, stopped: false, running: false },
+      control: { spectatorMode: false, semiAutoMode: false, paused: false, manualMode: false, canStep: false, stopped: false, running: false },
       createdAt,
       updatedAt: new Date().toISOString(),
     })

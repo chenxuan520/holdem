@@ -6,4 +6,8 @@ type ReplayStore interface {
 	GetReplay(id string) (ReplayDetail, bool, error)
 	DeleteReplay(id string) error
 	ClearReplays() error
+	SaveActiveMatch(record ActiveMatchRecord) error
+	ListActiveMatches() ([]ActiveMatchRecord, error)
+	DeleteActiveMatch(id string) error
+	ClearActiveMatches() error
 }

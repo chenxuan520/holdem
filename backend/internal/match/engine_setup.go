@@ -46,6 +46,7 @@ func prepareHand(players []Player, handNumber int, dealerSeat int, smallBlind in
 		Deck:               append([]string(nil), deck[cardIndex:]...),
 		Board:              []string{},
 		HoleCards:          holeCards,
+		RevealedCards:      map[int][]string{},
 		Folded:             folded,
 		AllIn:              allIn,
 		StreetContribution: streetContribution,
@@ -107,6 +108,18 @@ func buildTableState(players []Player, hand *handState, lastWinners []string) Ta
 				Cards:      cloneStrings(hand.HoleCards[player.Seat]),
 			})
 		}
+	} else {
+		for _, player := range players {
+			cards, ok := hand.RevealedCards[player.Seat]
+			if !ok || len(cards) == 0 || player.IsHuman {
+				continue
+			}
+			visibleHoleCards = append(visibleHoleCards, VisibleHoleCards{
+				Seat:       player.Seat,
+				PlayerName: player.Name,
+				Cards:      cloneStrings(cards),
+			})
+		}
 	}
 	legalActions := legalActionsForSeat(players, hand, hand.CurrentTurnSeat)
 	toCall := 0
@@ -119,22 +132,22 @@ func buildTableState(players []Player, hand *handState, lastWinners []string) Ta
 	}
 
 	return TableState{
-		HandNumber:      hand.Number,
-		Stage:           hand.Stage,
-		DealerSeat:      hand.DealerSeat,
-		SmallBlindSeat:  hand.SmallBlindSeat,
-		BigBlindSeat:    hand.BigBlindSeat,
-		CurrentTurnSeat: hand.CurrentTurnSeat,
-		Pot:             hand.Pot,
-		Board:           cloneStrings(hand.Board),
-		HeroCards:       heroCards,
+		HandNumber:       hand.Number,
+		Stage:            hand.Stage,
+		DealerSeat:       hand.DealerSeat,
+		SmallBlindSeat:   hand.SmallBlindSeat,
+		BigBlindSeat:     hand.BigBlindSeat,
+		CurrentTurnSeat:  hand.CurrentTurnSeat,
+		Pot:              hand.Pot,
+		Board:            cloneStrings(hand.Board),
+		HeroCards:        heroCards,
 		VisibleHoleCards: visibleHoleCards,
-		ToCall:          toCall,
-		MinimumRaiseTo:  minRaiseTo,
-		LegalActions:    cloneActions(legalActions),
-		ActionLog:       cloneActionLog(hand.ActionLog),
-		DecisionLog:     cloneDecisionLog(hand.DecisionLog),
-		LastWinners:     cloneStrings(lastWinners),
+		ToCall:           toCall,
+		MinimumRaiseTo:   minRaiseTo,
+		LegalActions:     cloneActions(legalActions),
+		ActionLog:        cloneActionLog(hand.ActionLog),
+		DecisionLog:      cloneDecisionLog(hand.DecisionLog),
+		LastWinners:      cloneStrings(lastWinners),
 	}
 }
 

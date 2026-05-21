@@ -32,6 +32,8 @@ func (s *Service) applyHumanAction(id string, req PlayerActionRequest) ([]pendin
 		return nil, Snapshot{}, err
 	}
 	s.matches[id] = snapshot
+	s.persistActiveMatchLocked(id, &snapshot)
+	s.matches[id] = snapshot
 	if snapshot.Status == "finished" {
 		s.persistReplayLocked(id, &snapshot)
 		s.matches[id] = snapshot
@@ -75,12 +77,12 @@ func (s *Service) applyAIDecision(id string, decision backendai.Decision, logEnt
 	})
 
 	pending := []pendingEvent{replayOnlyEvent("ai_decision_recorded", map[string]any{
-		"seat":           seat,
-		"playerName":     snapshot.Players[seat].Name,
-		"action":         decision.Action,
-		"amount":         decision.Amount,
-		"publicReason":   decision.PublicReason,
-		"privateReason":  decision.PrivateReason,
+		"seat":            seat,
+		"playerName":      snapshot.Players[seat].Name,
+		"action":          decision.Action,
+		"amount":          decision.Amount,
+		"publicReason":    decision.PublicReason,
+		"privateReason":   decision.PrivateReason,
 		"rawResponseBody": logEntry.ResponseBody,
 	})}
 
@@ -110,6 +112,8 @@ func (s *Service) applyAIDecision(id string, decision backendai.Decision, logEnt
 	rebuildSnapshotTable(&snapshot, hidden)
 	pending = append(pending, more...)
 	s.matches[id] = snapshot
+	s.persistActiveMatchLocked(id, &snapshot)
+	s.matches[id] = snapshot
 	if snapshot.Status == "finished" {
 		s.persistReplayLocked(id, &snapshot)
 		s.matches[id] = snapshot
@@ -134,6 +138,8 @@ func (s *Service) advanceNonHumanState(id string) ([]pendingEvent, Snapshot, err
 	if err != nil {
 		return nil, Snapshot{}, err
 	}
+	s.matches[id] = snapshot
+	s.persistActiveMatchLocked(id, &snapshot)
 	s.matches[id] = snapshot
 	if snapshot.Status == "finished" {
 		s.persistReplayLocked(id, &snapshot)

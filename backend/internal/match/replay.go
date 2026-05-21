@@ -4,6 +4,7 @@ import "time"
 
 type ReplaySummary struct {
 	ID           string    `json:"id"`
+	Status       string    `json:"status,omitempty"`
 	CreatedAt    time.Time `json:"createdAt"`
 	FinishedAt   time.Time `json:"finishedAt"`
 	WinnerName   string    `json:"winnerName"`
@@ -20,6 +21,14 @@ type ReplayDetail struct {
 	Hands     []ReplayHand  `json:"hands"`
 	AILogs    []AILog       `json:"aiLogs"`
 	CreatedAt time.Time     `json:"createdAt"`
+}
+
+type ActiveMatchRecord struct {
+	Snapshot      Snapshot        `json:"snapshot"`
+	Hand          *handState      `json:"hand"`
+	Replay        ReplayDetail    `json:"replay"`
+	Current       *ReplayHand     `json:"current"`
+	DecisionTrail []DecisionEntry `json:"decisionTrail"`
 }
 
 type ReplayHand struct {
@@ -42,16 +51,16 @@ type ReplayWinner struct {
 }
 
 type ReplayPlayerState struct {
-	Seat       int      `json:"seat"`
-	Name       string   `json:"name"`
-	IsHuman    bool     `json:"isHuman"`
-	PresetID   string   `json:"presetId,omitempty"`
-	StartingChips int   `json:"startingChips"`
-	EndingChips int     `json:"endingChips"`
-	HoleCards  []string `json:"holeCards"`
-	Folded     bool     `json:"folded"`
-	AllIn      bool     `json:"allIn"`
-	Eliminated bool     `json:"eliminated"`
+	Seat          int      `json:"seat"`
+	Name          string   `json:"name"`
+	IsHuman       bool     `json:"isHuman"`
+	PresetID      string   `json:"presetId,omitempty"`
+	StartingChips int      `json:"startingChips"`
+	EndingChips   int      `json:"endingChips"`
+	HoleCards     []string `json:"holeCards"`
+	Folded        bool     `json:"folded"`
+	AllIn         bool     `json:"allIn"`
+	Eliminated    bool     `json:"eliminated"`
 }
 
 type ReplayEvent struct {
@@ -77,9 +86,9 @@ type AILog struct {
 }
 
 type hiddenState struct {
-	hand    *handState
-	replay  ReplayDetail
-	current *ReplayHand
+	hand          *handState
+	replay        ReplayDetail
+	current       *ReplayHand
 	decisionTrail []DecisionEntry
 }
 
@@ -92,6 +101,7 @@ type handState struct {
 	Deck               []string
 	Board              []string
 	HoleCards          map[int][]string
+	RevealedCards      map[int][]string
 	Folded             map[int]bool
 	AllIn              map[int]bool
 	StreetContribution map[int]int

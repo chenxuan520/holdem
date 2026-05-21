@@ -28,7 +28,7 @@ export function ReplayView({ replay, loading }: Props) {
   if (!replay) {
     return (
       <div className="empty-state small card panel">
-        <strong>先从历史列表选择一场比赛</strong>
+        <strong>先从牌桌记录选择一场对局</strong>
         <p>这里会按整场 → 单手 → 动作展示完整回放，并可查看 AI 调试日志。</p>
       </div>
     )

@@ -178,11 +178,11 @@ func buildRequestPayload(preset config.Preset, input PromptInput, attempt int) m
 func maxTokensForAttempt(attempt int) int {
 	switch attempt {
 	case 1:
-		return 500
+		return 256
 	case 2:
-		return 700
+		return 384
 	default:
-		return 900
+		return 512
 	}
 }
 

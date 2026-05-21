@@ -20,7 +20,7 @@ function renderLobby(overrides: Partial<React.ComponentProps<typeof LobbyView>> 
       smallBlind={10}
       bigBlind={20}
       spectatorMode={false}
-      startManualMode={false}
+      spectatorRunMode="semi"
       loading={false}
       creating={false}
       error={null}
@@ -29,7 +29,7 @@ function renderLobby(overrides: Partial<React.ComponentProps<typeof LobbyView>> 
       onBigBlindChange={vi.fn()}
       onHumanNameChange={vi.fn()}
       onSpectatorModeChange={vi.fn()}
-      onStartManualModeChange={vi.fn()}
+      onSpectatorRunModeChange={vi.fn()}
       onAddSeat={vi.fn()}
       onUpdatePreset={vi.fn()}
       onUpdateAIName={vi.fn()}
@@ -54,6 +54,22 @@ describe('LobbyView', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '纯 AI 观战' }))
     expect(onSpectatorModeChange).toHaveBeenCalledWith(true)
+  })
+
+  it('defaults spectator run mode controls to semi-auto labels', () => {
+    renderLobby({ spectatorMode: true })
+
+    expect(screen.getByText('观战推进方式')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '半自动（默认）' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '全自动' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '手动逐步' })).toBeInTheDocument()
+  })
+
+  it('does not show spectator run mode controls in human mode', () => {
+    renderLobby({ spectatorMode: false })
+
+    expect(screen.queryByText('观战推进方式')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '半自动（默认）' })).not.toBeInTheDocument()
   })
 
   it('renders editable player name inputs', () => {

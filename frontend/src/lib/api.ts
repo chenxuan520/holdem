@@ -1,4 +1,4 @@
-import type { CreateMatchPayload, MatchSnapshot, Preset, ReplayDetail, ReplaySummary } from './types'
+import type { CreateMatchPayload, MatchSnapshot, Preset, RecordSummary, ReplayDetail, ReplaySummary } from './types'
 
 async function parseJSON<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -66,9 +66,29 @@ export async function fetchReplays(): Promise<ReplaySummary[]> {
   return payload.replays
 }
 
+export async function fetchRecords(): Promise<RecordSummary[]> {
+  const response = await fetch('/api/records')
+  const payload = await parseJSON<{ records: RecordSummary[] }>(response)
+  return payload.records
+}
+
 export async function fetchReplay(id: string): Promise<ReplayDetail> {
   const response = await fetch(`/api/replays/${id}`)
   return parseJSON<ReplayDetail>(response)
+}
+
+export async function deleteRecord(id: string): Promise<void> {
+  const response = await fetch(`/api/records/${id}`, {
+    method: 'DELETE',
+  })
+  await parseJSON<Record<string, never> | null>(response)
+}
+
+export async function clearRecords(): Promise<void> {
+  const response = await fetch('/api/records', {
+    method: 'DELETE',
+  })
+  await parseJSON<Record<string, never> | null>(response)
 }
 
 export async function deleteReplay(id: string): Promise<void> {

@@ -76,6 +76,7 @@ export type TableState = {
 
 export type ControlState = {
   spectatorMode: boolean
+  semiAutoMode: boolean
   paused: boolean
   manualMode: boolean
   canStep: boolean
@@ -107,11 +108,13 @@ export type CreateMatchPayload = {
   aiPlayerNames?: string[]
   humanName?: string
   spectatorMode?: boolean
+  semiAutoMode?: boolean
   manualMode?: boolean
 }
 
 export type ReplaySummary = {
   id: string
+  status?: string
   createdAt: string
   finishedAt: string
   winnerName: string
@@ -120,6 +123,23 @@ export type ReplaySummary = {
   initialChips: number
   smallBlind: number
   bigBlind: number
+}
+
+export type RecordSummary = {
+  id: string
+  status: 'running' | 'paused' | 'stopped' | 'finished'
+  createdAt: string
+  updatedAt: string
+  finishedAt?: string
+  winnerName?: string
+  playerCount: number
+  handsPlayed: number
+  initialChips: number
+  smallBlind: number
+  bigBlind: number
+  spectatorMode: boolean
+  continueAvailable: boolean
+  replayAvailable: boolean
 }
 
 export type ReplayWinner = {

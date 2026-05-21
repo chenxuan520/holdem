@@ -45,36 +45,64 @@ func (s *Service) ControlMatch(id string, req ControlRequest) (Snapshot, error) 
 		snapshot.Control.Paused = true
 	case "resume":
 		snapshot.Control.Paused = false
+		if snapshot.Status == "hand_complete" {
+			snapshot.Control.CanStep = true
+		} else {
+			snapshot.Control.CanStep = false
+		}
 		snapshot.Control.ManualMode = false
+	case "auto_on":
+		snapshot.Control.SemiAutoMode = false
+		snapshot.Control.ManualMode = false
+		snapshot.Control.Paused = false
+		snapshot.Control.CanStep = false
+	case "semi_auto_on":
+		snapshot.Control.SemiAutoMode = true
+		snapshot.Control.ManualMode = false
+		snapshot.Control.Paused = false
 		snapshot.Control.CanStep = false
 	case "manual_on":
 		snapshot.Control.ManualMode = true
+		snapshot.Control.SemiAutoMode = false
 		snapshot.Control.Paused = false
 		snapshot.Control.CanStep = false
 	case "manual_off":
 		snapshot.Control.ManualMode = false
+		snapshot.Control.SemiAutoMode = false
 		snapshot.Control.CanStep = false
 		snapshot.Control.Paused = false
 	case "step":
 		snapshot.Control.ManualMode = true
+		snapshot.Control.SemiAutoMode = false
 		snapshot.Control.Paused = false
 		snapshot.Control.CanStep = true
 	case "stop":
 		snapshot.Control.Stopped = true
 		snapshot.Status = "stopped"
-		snapshot.Warning = "比赛已手动终止"
+		s.persistStoppedReplayLocked(id, &snapshot)
+		if snapshot.Warning != "" {
+			snapshot.Warning = "比赛已手动终止；" + snapshot.Warning
+		} else {
+			snapshot.Warning = "比赛已手动终止"
+		}
 	case "continue":
 		snapshot.Control.Paused = false
-		snapshot.Control.CanStep = false
+		if snapshot.Status == "hand_complete" {
+			snapshot.Control.CanStep = true
+		} else {
+			snapshot.Control.CanStep = false
+		}
 	default:
 		s.mu.Unlock()
 		return Snapshot{}, fmt.Errorf("unsupported control action %q", req.Action)
 	}
 
 	s.matches[id] = snapshot
+	s.persistActiveMatchLocked(id, &snapshot)
+	s.matches[id] = snapshot
 	s.mu.Unlock()
 
-	if req.Action == "resume" || req.Action == "manual_off" || req.Action == "continue" || req.Action == "step" {
+	if req.Action == "resume" || req.Action == "manual_off" || req.Action == "continue" || req.Action == "step" || req.Action == "auto_on" || req.Action == "semi_auto_on" || req.Action == "manual_on" {
 		s.startAutoplayIfNeeded(id)
 	}
 

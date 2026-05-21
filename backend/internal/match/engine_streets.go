@@ -72,7 +72,7 @@ func dealNextBoard(snapshot *Snapshot, hidden *hiddenState) ([]pendingEvent, err
 	hand.Stage = nextStage
 	hand.CurrentBet = 0
 	hand.MinRaiseSize = snapshot.BigBlind
-	hand.CurrentTurnSeat = firstPostflopTurn(snapshot.Players, hand.DealerSeat)
+	hand.CurrentTurnSeat = firstPostflopTurn(snapshot.Players, hand, hand.DealerSeat)
 	for _, player := range snapshot.Players {
 		hand.StreetContribution[player.Seat] = 0
 		hand.Acted[player.Seat] = false
@@ -90,6 +90,7 @@ func dealNextBoard(snapshot *Snapshot, hidden *hiddenState) ([]pendingEvent, err
 
 func awardSingleRemaining(snapshot *Snapshot, hidden *hiddenState) ([]pendingEvent, error) {
 	hand := hidden.hand
+	hand.RevealedCards = map[int][]string{}
 	winningSeat := -1
 	for _, player := range snapshot.Players {
 		if player.Eliminated || hand.Folded[player.Seat] {
@@ -157,8 +158,10 @@ func settleShowdown(snapshot *Snapshot, hidden *hiddenState) ([]pendingEvent, er
 	}
 
 	replayWinners := make([]ReplayWinner, 0, len(awards))
+	hand.RevealedCards = map[int][]string{}
 	for seat, amount := range awards {
 		snapshot.Players[seat].Chips += amount
+		hand.RevealedCards[seat] = cloneStrings(hand.HoleCards[seat])
 		replayWinners = append(replayWinners, ReplayWinner{
 			Seat:       seat,
 			PlayerName: snapshot.Players[seat].Name,
@@ -188,11 +191,12 @@ func startNextHandOrFinish(snapshot *Snapshot, hidden *hiddenState) ([]pendingEv
 			winnerName = snapshot.Players[activeSeats[0]].Name
 		}
 		snapshot.WinnerName = winnerName
+		hidden.replay.Summary.Status = "finished"
 		hidden.replay.Summary.WinnerName = winnerName
 		hidden.replay.Summary.HandsPlayed = len(hidden.replay.Hands)
 		hidden.replay.Summary.FinishedAt = time.Now().UTC()
 		return []pendingEvent{publicEvent("match_finished", map[string]any{
-			"winnerName": winnerName,
+			"winnerName":  winnerName,
 			"handsPlayed": len(hidden.replay.Hands),
 		})}, nil
 	}
@@ -240,12 +244,7 @@ func finalizeHand(snapshot *Snapshot, hidden *hiddenState, winners []ReplayWinne
 	hidden.replay.Summary.HandsPlayed = len(hidden.replay.Hands)
 	hidden.hand.CurrentTurnSeat = -1
 	snapshot.Table.LastWinners = winnerNames(winners)
-	snapshot.Table.CompletedHands = len(hidden.replay.Hands)
-	snapshot.Table.ActionLog = append([]ActionLog(nil), hidden.hand.ActionLog...)
-	snapshot.Table.DecisionLog = recentDecisionEntries(hidden.decisionTrail, 10)
-	snapshot.Table.Board = append([]string(nil), hidden.hand.Board...)
-	snapshot.Table.LegalActions = nil
-	snapshot.Table.CurrentTurnSeat = -1
+	rebuildSnapshotTable(snapshot, hidden)
 	snapshot.Status = "hand_complete"
 	return newlyEliminated
 }
@@ -279,11 +278,11 @@ func activeActors(players []Player, hand *handState) int {
 	return count
 }
 
-func firstPostflopTurn(players []Player, dealerSeat int) int {
+func firstPostflopTurn(players []Player, hand *handState, dealerSeat int) int {
 	seat := dealerSeat
 	for step := 0; step < len(players); step++ {
 		seat = nextLiveSeat(players, seat)
-		if !players[seat].Eliminated && players[seat].Chips > 0 {
+		if playerCanAct(players, hand, seat) {
 			return seat
 		}
 	}

@@ -9,7 +9,7 @@ type Props = {
   smallBlind: number
   bigBlind: number
   spectatorMode: boolean
-  startManualMode: boolean
+  spectatorRunMode: 'semi' | 'auto' | 'manual'
   loading: boolean
   creating: boolean
   error: string | null
@@ -18,7 +18,7 @@ type Props = {
   onSmallBlindChange: (value: number) => void
   onBigBlindChange: (value: number) => void
   onSpectatorModeChange: (value: boolean) => void
-  onStartManualModeChange: (value: boolean) => void
+  onSpectatorRunModeChange: (value: 'semi' | 'auto' | 'manual') => void
   onAddSeat: () => void
   onUpdatePreset: (index: number, value: string) => void
   onUpdateAIName: (index: number, value: string) => void
@@ -35,7 +35,7 @@ export function LobbyView({
   smallBlind,
   bigBlind,
   spectatorMode,
-  startManualMode,
+  spectatorRunMode,
   loading,
   creating,
   error,
@@ -44,7 +44,7 @@ export function LobbyView({
   onSmallBlindChange,
   onBigBlindChange,
   onSpectatorModeChange,
-  onStartManualModeChange,
+  onSpectatorRunModeChange,
   onAddSeat,
   onUpdatePreset,
   onUpdateAIName,
@@ -63,7 +63,7 @@ export function LobbyView({
           <div>
             <span className="eyebrow">Holdem AI Battle</span>
             <h1>德州扑克 AI 牌桌</h1>
-            <p>这版默认按“统一提示词、比较不同模型聪明程度”的方式来跑。你可以直接开桌、实时观察、赛后回放，并查看每次 AI 决策日志。</p>
+            <p>直接建桌、实时查看牌局进展、赛后回看记录，并查看每次 AI 决策日志。</p>
 
             <div className="hero-metrics">
               <Metric label="总人数" value={`${totalPlayers} 人`} />
@@ -74,14 +74,14 @@ export function LobbyView({
 
           <aside className="hero-sidecard">
             <div className="hero-sidecard-top">
-              <span className="badge accent">Benchmark Mode</span>
-              <strong>统一 Prompt</strong>
+              <span className="badge accent">本地优先</span>
+              <strong>实时对战与回放</strong>
             </div>
-            <p>当前 3 个预设都使用同一套基准提示词，主要差异只保留在模型配置层，方便直接做智能程度对比。</p>
+            <p>支持人机对战、纯 AI 观战、牌桌记录和赛后回放。AI 预设从服务端读取，浏览器端不会拿到 token。</p>
             <div className="hero-chip-row">
-              <span>OpenAI Compatible</span>
-              <span>DeepSeek Default</span>
-              <span>Replay Ready</span>
+              <span>OpenAI 兼容</span>
+              <span>实时牌桌</span>
+              <span>回放记录</span>
             </div>
           </aside>
         </div>
@@ -106,14 +106,29 @@ export function LobbyView({
             <button className={`toggle-chip ${spectatorMode ? 'active' : ''}`} onClick={() => onSpectatorModeChange(true)} type="button">
               纯 AI 观战
             </button>
-            {spectatorMode ? (
-              <button className={`toggle-chip ${startManualMode ? 'active' : ''}`} onClick={() => onStartManualModeChange(!startManualMode)} type="button">
-                {startManualMode ? '启动即手动模式' : '启动后自动推进'}
-              </button>
-            ) : null}
           </div>
 
-          <div className="input-grid">
+          {spectatorMode ? (
+            <section className="submode-panel">
+              <div className="submode-panel-head">
+                <strong>观战推进方式</strong>
+                <span>{spectatorRunMode === 'semi' ? '每手结束后停下' : spectatorRunMode === 'manual' ? '每步都要手动继续' : '整场持续自动推进'}</span>
+              </div>
+              <div className="mode-toggle-row secondary">
+                <button className={`toggle-chip ${spectatorRunMode === 'semi' ? 'active' : ''}`} onClick={() => onSpectatorRunModeChange('semi')} type="button">
+                  半自动（默认）
+                </button>
+                <button className={`toggle-chip ${spectatorRunMode === 'auto' ? 'active' : ''}`} onClick={() => onSpectatorRunModeChange('auto')} type="button">
+                  全自动
+                </button>
+                <button className={`toggle-chip ${spectatorRunMode === 'manual' ? 'active' : ''}`} onClick={() => onSpectatorRunModeChange('manual')} type="button">
+                  手动逐步
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          <div className={`input-grid ${!spectatorMode ? 'with-human' : ''}`}>
             {!spectatorMode ? (
               <label>
                 <span>玩家名称</span>
@@ -139,7 +154,7 @@ export function LobbyView({
               <div className="seat-row" key={`${presetID}-${index}`}>
                   <div>
                     <strong>AI 座位 {index + 1}</strong>
-                    <p>{spectatorMode ? '当前为观战桌，系统会自动推进。' : '重复上桌时，后端会自动区分为 #1 / #2。'} </p>
+                    <p>{spectatorMode ? spectatorRunMode === 'semi' ? '当前为半自动观战：每手分出赢家后会停下，等你继续。' : spectatorRunMode === 'manual' ? '当前为手动逐步：每次 AI 决策前都要你点下一步。' : '当前为全自动观战：系统会连续推进整场。': '重复上桌时，后端会自动区分为 #1 / #2。'} </p>
                   </div>
 
                 <div className="seat-controls">
@@ -200,7 +215,7 @@ export function LobbyView({
           </section>
 
           <section className="card panel compact-info">
-            <h2>这版已经具备</h2>
+            <h2>当前已支持</h2>
             <ul className="feature-list">
               <li>实时牌桌与 SSE 动作流</li>
               <li>AI 决策调用与安全降级</li>
@@ -209,8 +224,8 @@ export function LobbyView({
             </ul>
 
             <div className="benchmark-note">
-              <strong>模型对比建议</strong>
-              <p>如果你后面要测不同模型，只改 `model / endpoint / token`，保持同一 prompt 即可保证横向比较更公平。</p>
+              <strong>预设使用建议</strong>
+              <p>如果你想比较不同模型，可以保持提示词一致，只替换 `model / endpoint / token`；如果只是日常对战，也可以按预设名字自由组织。</p>
             </div>
           </section>
         </section>

@@ -11,11 +11,11 @@ func (s *Service) buildPromptInput(snapshot Snapshot, hidden *hiddenState, seat 
 			continue
 		}
 		players = append(players, map[string]any{
-			"seat":       player.Seat,
-			"name":       player.Name,
-			"chips":      player.Chips,
-			"folded":     hidden.hand.Folded[player.Seat],
-			"allIn":      hidden.hand.AllIn[player.Seat],
+			"seat":   player.Seat,
+			"name":   player.Name,
+			"chips":  player.Chips,
+			"folded": hidden.hand.Folded[player.Seat],
+			"allIn":  hidden.hand.AllIn[player.Seat],
 		})
 	}
 
@@ -63,6 +63,14 @@ func fallbackDecision(snapshot Snapshot, hand *handState, seat int) backendai.De
 		}
 	}
 	return backendai.Decision{Action: "fold", PublicReason: "模型响应异常，系统回退为安全弃牌。", PrivateReason: "模型响应异常，系统自动回退为弃牌。"}
+}
+
+func requestFailureDecision() backendai.Decision {
+	return backendai.Decision{
+		Action:        "fold",
+		PublicReason:  "模型连续请求失败，系统直接弃牌止损。",
+		PrivateReason: "模型连续 3 次请求失败，系统直接弃牌止损。",
+	}
 }
 
 func privateReasonForView(players []Player, value string) string {

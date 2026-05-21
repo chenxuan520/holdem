@@ -28,6 +28,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/presets", s.handlePresets)
 	mux.HandleFunc("/api/matches", s.handleMatches)
 	mux.HandleFunc("/api/matches/", s.handleMatchByID)
+	mux.HandleFunc("/api/records", s.handleRecords)
+	mux.HandleFunc("/api/records/", s.handleRecordByID)
 	mux.HandleFunc("/api/replays", s.handleReplays)
 	mux.HandleFunc("/api/replays/", s.handleReplayByID)
 
@@ -123,6 +125,44 @@ func (s *Server) handleReplays(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		writeMethodNotAllowed(w, strings.Join([]string{http.MethodGet, http.MethodDelete}, ", "))
+	}
+}
+
+func (s *Server) handleRecords(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"records": s.matches.ListRecords()})
+	case http.MethodDelete:
+		if err := s.matches.ClearRecords(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		writeMethodNotAllowed(w, strings.Join([]string{http.MethodGet, http.MethodDelete}, ", "))
+	}
+}
+
+func (s *Server) handleRecordByID(w http.ResponseWriter, r *http.Request) {
+	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/records/"), "/")
+	if id == "" {
+		writeError(w, http.StatusNotFound, "record not found")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.matches.DeleteRecord(id); err != nil {
+			status := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "not found") {
+				status = http.StatusNotFound
+			}
+			writeError(w, status, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		writeMethodNotAllowed(w, http.MethodDelete)
 	}
 }
 

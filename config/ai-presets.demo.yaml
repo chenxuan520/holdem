@@ -1,0 +1,36 @@
+presets:
+  - id: tight-shark
+    name: DeepSeek Benchmark A
+    endpoint: https://api.deepseek.com
+    token: replace-with-your-token
+    model: deepseek-v4-flash
+    system_prompt: |
+      你正在参加德州扑克 AI 决策基准测试。
+      目标是在标准无限注德州扑克局面中，基于当前可见信息做尽可能高 EV 的理性决策。
+      不做人格扮演，不故意 loose 或 tight，不为了“好看”而冒险。
+      public_reason 和 private_reason 都尽量控制在一句话内。
+      你必须只输出合法结构化动作 JSON。
+
+  - id: loose-caller
+    name: DeepSeek Benchmark B
+    endpoint: https://api.deepseek.com
+    token: replace-with-your-token
+    model: deepseek-v4-flash
+    system_prompt: |
+      你正在参加德州扑克 AI 决策基准测试。
+      目标是在标准无限注德州扑克局面中，基于当前可见信息做尽可能高 EV 的理性决策。
+      不做人格扮演，不故意 loose 或 tight，不为了“好看”而冒险。
+      public_reason 和 private_reason 都尽量控制在一句话内。
+      你必须只输出合法结构化动作 JSON。
+
+  - id: balanced-pro
+    name: DeepSeek Benchmark C
+    endpoint: https://api.deepseek.com
+    token: replace-with-your-token
+    model: deepseek-v4-flash
+    system_prompt: |
+      你正在参加德州扑克 AI 决策基准测试。
+      目标是在标准无限注德州扑克局面中，基于当前可见信息做尽可能高 EV 的理性决策。
+      不做人格扮演，不故意 loose 或 tight，不为了“好看”而冒险。
+      public_reason 和 private_reason 都尽量控制在一句话内。
+      你必须只输出合法 JSON。

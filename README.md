@@ -12,21 +12,28 @@
 
 - `frontend/` React + Vite 前端
 - `backend/` Go 后端
-- `config/ai-presets.yaml` AI 预设配置
+- `config/ai-presets.demo.yaml` 可提交的 AI 预设 demo
+- `config/ai-presets.yaml` 本机实际使用的 AI 预设配置（默认不提交）
 - `config/app.json` 前后端运行配置（端口、数据文件、API 代理目标）
 
 ## 启动
 
 ### 1. 配置 AI
 
-编辑 `config/ai-presets.yaml`，填入你的：
+先复制 demo 文件，再填你自己的真实配置：
+
+```bash
+cp config/ai-presets.demo.yaml config/ai-presets.yaml
+```
+
+真正开打前，把 `config/ai-presets.yaml` 里的占位值替换成你的：
 
 - `endpoint`
 - `token`
 - `model`
 - `system_prompt`
 
-当前仓库默认已经切到 DeepSeek 兼容配置，并且 3 个预设使用同一套 benchmark prompt，方便你只改 `model / endpoint / token` 来比较模型聪明程度。
+仓库提交的是 `config/ai-presets.demo.yaml`，里面已经按 DeepSeek 兼容格式写好，并且 3 个预设使用同一套 benchmark prompt，方便你只改 `model / endpoint / token` 来比较模型聪明程度。
 
 如果保留占位 token，系统会自动走安全降级动作，方便本地演示。
 

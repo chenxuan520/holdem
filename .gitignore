@@ -6,4 +6,5 @@ backend/server
 data/*.db
 data/*.db-*
 config/ai-presets.yaml
+.opencode/
 .DS_Store

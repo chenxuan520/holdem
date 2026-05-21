@@ -1,0 +1,12 @@
+{
+  "backend": {
+    "port": 18130,
+    "dataPath": "../data/holdem-live.db",
+    "presetsPath": "ai-presets.yaml"
+  },
+  "frontend": {
+    "host": "127.0.0.1",
+    "port": 5173,
+    "apiTarget": "http://127.0.0.1:18130"
+  }
+}

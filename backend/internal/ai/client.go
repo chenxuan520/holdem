@@ -167,10 +167,14 @@ func buildRequestPayload(preset config.Preset, input PromptInput, attempt int) m
 		"max_tokens":  maxTokensForAttempt(attempt),
 		"messages":    messages,
 	}
-	if useToolCallingMode(preset) {
+	switch preset.StructuredOutputMode() {
+	case config.StructuredOutputToolCall:
 		payload["tools"] = decisionTools()
-	} else if useJSONObjectMode(preset) {
+	case config.StructuredOutputJSONObject:
 		payload["response_format"] = map[string]string{"type": "json_object"}
+	case config.StructuredOutputNone:
+		// Fall back to plain prompt-only constraints. parse.go will still try
+		// to salvage JSON from the message content.
 	}
 	return payload
 }
@@ -205,14 +209,6 @@ func systemInstruction(prompt string) string {
 func mustJSON(value any) string {
 	data, _ := json.Marshal(value)
 	return string(data)
-}
-
-func useJSONObjectMode(preset config.Preset) bool {
-	return strings.Contains(strings.ToLower(preset.Endpoint), "deepseek") || strings.Contains(strings.ToLower(preset.Model), "deepseek")
-}
-
-func useToolCallingMode(preset config.Preset) bool {
-	return strings.Contains(strings.ToLower(preset.Endpoint), "deepseek") || strings.Contains(strings.ToLower(preset.Model), "deepseek")
 }
 
 func decisionTools() []map[string]any {

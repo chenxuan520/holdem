@@ -1,44 +1,39 @@
+export type BubbleDirection = 'up' | 'down'
+
 export type SeatStyle = {
   top: string
   left: string
-  transform: string
+  bubbleDirection: BubbleDirection
 }
 
-export function seatLayout(count: number): SeatStyle[] {
-  const layouts: Record<number, SeatStyle[]> = {
-    2: [
-      { top: '86%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '8%', left: '50%', transform: 'translate(-50%, -50%)' },
-    ],
-    3: [
-      { top: '86%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '18%', left: '20%', transform: 'translate(-50%, -50%)' },
-      { top: '18%', left: '80%', transform: 'translate(-50%, -50%)' },
-    ],
-    4: [
-      { top: '86%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '54%', left: '10%', transform: 'translate(-50%, -50%)' },
-      { top: '8%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '54%', left: '90%', transform: 'translate(-50%, -50%)' },
-    ],
-    5: [
-      { top: '86%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '68%', left: '12%', transform: 'translate(-50%, -50%)' },
-      { top: '16%', left: '24%', transform: 'translate(-50%, -50%)' },
-      { top: '16%', left: '76%', transform: 'translate(-50%, -50%)' },
-      { top: '68%', left: '88%', transform: 'translate(-50%, -50%)' },
-    ],
-    6: [
-      { top: '86%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '70%', left: '11%', transform: 'translate(-50%, -50%)' },
-      { top: '18%', left: '16%', transform: 'translate(-50%, -50%)' },
-      { top: '7%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '18%', left: '84%', transform: 'translate(-50%, -50%)' },
-      { top: '70%', left: '89%', transform: 'translate(-50%, -50%)' },
-    ],
-  }
+// Seats are placed inside the felt with comfortable padding so that even the
+// leftmost/rightmost positions in 6-player layouts keep a full card body away
+// from the felt edge. Tighter than the bezel radius keeps the layout tidy.
+const RADIUS_X = 36
+const RADIUS_Y = 33
+const CENTER_X = 50
+const CENTER_Y = 50
+const START_DEGREES = 90 // bottom-center is hero seat
 
-  return layouts[count] ?? layouts[6]
+export function seatLayout(count: number): SeatStyle[] {
+  if (count <= 0) return []
+  const step = 360 / count
+  const layouts: SeatStyle[] = []
+  for (let i = 0; i < count; i++) {
+    const angleDeg = START_DEGREES + step * i
+    const angleRad = (angleDeg * Math.PI) / 180
+    const sinValue = Math.sin(angleRad)
+    const x = CENTER_X + RADIUS_X * Math.cos(angleRad)
+    const y = CENTER_Y + RADIUS_Y * sinValue
+    // Seats above the table center get bubbles that drop downward so they
+    // never spill outside the table's top edge into the controls area.
+    layouts.push({
+      top: `${y}%`,
+      left: `${x}%`,
+      bubbleDirection: sinValue < 0 ? 'down' : 'up',
+    })
+  }
+  return layouts
 }
 
 export function blindSeatsForReplay(seats: number[], dealerSeat: number) {

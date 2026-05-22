@@ -109,6 +109,83 @@ func TestPersistReplayLockedSetsWarningOnStoreFailure(t *testing.T) {
 	}
 }
 
+func TestDefaultAINamesOmitOrdinalForUniquePresets(t *testing.T) {
+	service := NewService([]config.Preset{
+		{ID: "ai-1", Name: "Benchmark A", Endpoint: "https://api.openai.com/v1", Token: "replace-with-your-token", Model: "gpt-4.1-mini", SystemPrompt: "test"},
+		{ID: "ai-2", Name: "Benchmark B", Endpoint: "https://api.openai.com/v1", Token: "replace-with-your-token", Model: "gpt-4.1-mini", SystemPrompt: "test"},
+	}, nil)
+
+	snapshot, err := service.CreateMatch(CreateRequest{
+		InitialChips: 100,
+		SmallBlind:   5,
+		BigBlind:     10,
+		AIPresetIDs:  []string{"ai-1", "ai-2"},
+	})
+	if err != nil {
+		t.Fatalf("CreateMatch returned error: %v", err)
+	}
+
+	aiSeats := snapshot.Players[1:]
+	if len(aiSeats) != 2 {
+		t.Fatalf("expected 2 ai seats, got %d", len(aiSeats))
+	}
+	if aiSeats[0].Name != "Benchmark A" || aiSeats[1].Name != "Benchmark B" {
+		t.Fatalf("expected unique-preset names without ordinals, got %+v", aiSeats)
+	}
+}
+
+func TestDefaultAINamesAddOrdinalsForRepeatedPresets(t *testing.T) {
+	service := NewService([]config.Preset{
+		{ID: "ai-1", Name: "Benchmark A", Endpoint: "https://api.openai.com/v1", Token: "replace-with-your-token", Model: "gpt-4.1-mini", SystemPrompt: "test"},
+	}, nil)
+
+	snapshot, err := service.CreateMatch(CreateRequest{
+		InitialChips:  100,
+		SmallBlind:    5,
+		BigBlind:      10,
+		AIPresetIDs:   []string{"ai-1", "ai-1", "ai-1"},
+		SpectatorMode: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateMatch returned error: %v", err)
+	}
+
+	if len(snapshot.Players) != 3 {
+		t.Fatalf("expected 3 ai seats, got %d", len(snapshot.Players))
+	}
+	expected := []string{"Benchmark A #1", "Benchmark A #2", "Benchmark A #3"}
+	for i, want := range expected {
+		if snapshot.Players[i].Name != want {
+			t.Fatalf("expected seat %d to be %q, got %q", i, want, snapshot.Players[i].Name)
+		}
+	}
+}
+
+func TestCustomAINameOverridesDefault(t *testing.T) {
+	service := NewService([]config.Preset{
+		{ID: "ai-1", Name: "Benchmark A", Endpoint: "https://api.openai.com/v1", Token: "replace-with-your-token", Model: "gpt-4.1-mini", SystemPrompt: "test"},
+	}, nil)
+
+	snapshot, err := service.CreateMatch(CreateRequest{
+		InitialChips:  100,
+		SmallBlind:    5,
+		BigBlind:      10,
+		AIPresetIDs:   []string{"ai-1", "ai-1"},
+		AIPlayerNames: []string{"老鲨鱼", ""},
+		SpectatorMode: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateMatch returned error: %v", err)
+	}
+
+	if snapshot.Players[0].Name != "老鲨鱼" {
+		t.Fatalf("expected first ai seat to keep custom name, got %q", snapshot.Players[0].Name)
+	}
+	if snapshot.Players[1].Name != "Benchmark A #2" {
+		t.Fatalf("expected second ai seat to fall back to numbered default, got %q", snapshot.Players[1].Name)
+	}
+}
+
 func TestCreateMatchUsesCustomPlayerNames(t *testing.T) {
 	service := NewService([]config.Preset{
 		{ID: "ai-1", Name: "Benchmark A", Endpoint: "https://api.openai.com/v1", Token: "replace-with-your-token", Model: "gpt-4.1-mini", SystemPrompt: "test"},

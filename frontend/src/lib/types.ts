@@ -1,9 +1,12 @@
+export type StructuredOutputMode = 'tool_call' | 'json_object' | 'none'
+
 export type Preset = {
   id: string
   name: string
   endpoint: string
   model: string
   systemPrompt: string
+  structuredOutput?: StructuredOutputMode
 }
 
 export type Player = {

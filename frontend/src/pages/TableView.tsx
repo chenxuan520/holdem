@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { cardParts, isRedCard } from '../lib/cards'
+import { PokerCard } from '../components/PokerCard'
+import { ChipStack } from '../components/PokerChips'
+import { PokerSeat } from '../components/PokerSeat'
 import { seatLayout } from '../lib/tableLayout'
-import type { MatchSnapshot, StreamEvent } from '../lib/types'
+import type { ActionLog, DecisionEntry, MatchSnapshot, StreamEvent } from '../lib/types'
 
 type Props = {
   match: MatchSnapshot
@@ -11,263 +13,354 @@ type Props = {
   onControl: (action: string) => void
 }
 
-type SeatBubble = {
-  key: string
+type LiveBubble = {
   seat: number
+  key: string
   title: string
   detail?: string
 }
 
 export function TableView({ match, events, actionPending, onAction, onControl }: Props) {
-  const [raiseAmount, setRaiseAmount] = useState<number>(match.table.minimumRaiseTo || 0)
-  const [seatBubble, setSeatBubble] = useState<SeatBubble | null>(null)
   const boardCards = match.table.board ?? []
   const heroCards = match.table.heroCards ?? []
   const legalActions = match.table.legalActions ?? []
   const actionLog = match.table.actionLog ?? []
   const decisionLog = match.table.decisionLog ?? []
+  const lastWinners = match.table.lastWinners ?? []
+  const visibleHoleCards = match.table.visibleHoleCards ?? []
   const hasHumanPlayer = match.players.some((player) => player.isHuman)
   const spectatorMode = match.control?.spectatorMode || !hasHumanPlayer
-  const visibleCardsBySeat = new Map((match.table.visibleHoleCards ?? []).map((item) => [item.seat, item.cards]))
-  const latestDecisionLog = useMemo(() => [...decisionLog].reverse(), [decisionLog])
+
+  const visibleCardsBySeat = useMemo(() => {
+    const map = new Map<number, string[]>()
+    for (const item of visibleHoleCards) {
+      map.set(item.seat, item.cards)
+    }
+    return map
+  }, [visibleHoleCards])
+
+  const streetContributionBySeat = useMemo(() => {
+    const map = new Map<number, number>()
+    if (match.status === 'hand_complete' || match.status === 'finished' || match.status === 'stopped') {
+      return map
+    }
+    for (const entry of actionLog) {
+      if (entry.street !== match.table.stage) continue
+      if (!entry.amount) continue
+      map.set(entry.seat, (map.get(entry.seat) ?? 0) + entry.amount)
+    }
+    return map
+  }, [actionLog, match.table.stage, match.status])
+
+  const seatStatus = useMemo(() => {
+    const folded = new Set<number>()
+    const allIn = new Set<number>()
+    for (const entry of actionLog) {
+      if (entry.action === 'fold') folded.add(entry.seat)
+      if (entry.action === 'all_in') allIn.add(entry.seat)
+    }
+    return { folded, allIn }
+  }, [actionLog])
+
   const latestActionLog = useMemo(() => [...actionLog].reverse(), [actionLog])
+  const latestDecisionLog = useMemo(() => [...decisionLog].reverse(), [decisionLog])
+
+  const latestActionBySeat = useMemo(() => {
+    const map = new Map<number, ActionLog>()
+    for (const entry of latestActionLog) {
+      if (!map.has(entry.seat)) map.set(entry.seat, entry)
+    }
+    return map
+  }, [latestActionLog])
+
   const latestDecisionBySeat = useMemo(() => {
-    const map = new Map<number, (typeof decisionLog)[number]>()
+    const map = new Map<number, DecisionEntry>()
     for (const entry of latestDecisionLog) {
-      if (!map.has(entry.seat)) {
-        map.set(entry.seat, entry)
-      }
+      if (!map.has(entry.seat)) map.set(entry.seat, entry)
     }
     return map
   }, [latestDecisionLog])
+
   const latestDecision = latestDecisionLog[0]
   const latestMeaningfulAction = useMemo(
     () => latestActionLog.find((entry) => !entry.action.startsWith('post_')),
     [latestActionLog],
   )
-  const latestActionBySeat = useMemo(() => {
-    const map = new Map<number, { action: string; amount: number; street: string }>()
-    for (const entry of latestActionLog) {
-      if (!map.has(entry.seat)) {
-        map.set(entry.seat, { action: entry.action, amount: entry.amount, street: entry.street })
+
+  const winnerSeatSet = useMemo(() => {
+    const set = new Set<number>()
+    if (match.status === 'hand_complete' || match.status === 'finished') {
+      for (const player of match.players) {
+        if (lastWinners.includes(player.name)) set.add(player.seat)
       }
     }
-    return map
-  }, [latestActionLog])
+    return set
+  }, [lastWinners, match.players, match.status])
+
   const seatStyles = useMemo(() => seatLayout(match.players.length), [match.players.length])
-  const dealerPlayer = match.players.find((player) => player.seat === match.table.dealerSeat)
-  const currentActor = match.players.find((player) => player.seat === match.table.currentTurnSeat)
+  const dealerPlayer = match.players.find((p) => p.seat === match.table.dealerSeat)
+  const currentActor = match.players.find((p) => p.seat === match.table.currentTurnSeat)
+
   const turnStatus = describeTurnStatus(match, spectatorMode, currentActor?.name ?? null)
   const lifecycleStatus = describeLifecycleStatus(match)
+
+  const [raiseAmount, setRaiseAmount] = useState<number>(match.table.minimumRaiseTo || 0)
+  useEffect(() => {
+    setRaiseAmount(match.table.minimumRaiseTo || 0)
+  }, [match.table.minimumRaiseTo, match.id, match.table.handNumber, match.table.stage])
+
+  const raiseAction = useMemo(() => legalActions.find((action) => action.action === 'raise'), [legalActions])
+
   const latestActionBubble = useMemo(
     () => buildLiveSeatBubble(latestMeaningfulAction, latestDecisionBySeat.get(latestMeaningfulAction?.seat ?? -1)),
     [latestMeaningfulAction, latestDecisionBySeat],
   )
 
-  useEffect(() => {
-    setRaiseAmount(match.table.minimumRaiseTo || 0)
-  }, [match.table.minimumRaiseTo, match.id, match.table.handNumber, match.table.stage])
-
+  const [bubble, setBubble] = useState<LiveBubble | null>(null)
   useEffect(() => {
     if (!latestActionBubble) {
-      setSeatBubble(null)
+      setBubble(null)
       return
     }
-
-    setSeatBubble(latestActionBubble)
+    setBubble(latestActionBubble)
     const timeout = window.setTimeout(() => {
-      setSeatBubble((current) => (current?.key === latestActionBubble.key ? null : current))
+      setBubble((current) => (current?.key === latestActionBubble.key ? null : current))
     }, 3000)
     return () => window.clearTimeout(timeout)
   }, [latestActionBubble])
 
-  const raiseAction = useMemo(
-    () => legalActions.find((action) => action.action === 'raise'),
-    [legalActions],
-  )
-
   return (
     <div className="table-layout">
-      <div className="match-card card panel">
-        <div className="match-summary">
-          <div>
+      <section className="poker-room card panel">
+        <header className="poker-room-header">
+          <div className="poker-room-id">
+            <span className="match-eyebrow">MATCH</span>
             <strong>比赛 #{match.id}</strong>
-            <span>{new Date(match.createdAt).toLocaleString('zh-CN')}</span>
+            <span className="muted-text">{new Date(match.createdAt).toLocaleString('zh-CN')}</span>
           </div>
-          <div className="match-summary-actions">
-            <div className="table-meta-pills">
-              <span className={`status-pill ${lifecycleStatus.tone}`}>牌桌 {lifecycleStatus.label}</span>
-              <span className="status-pill">第 {match.table.handNumber} 手</span>
-              <span className="status-pill">已完成 {match.table.completedHands} 手</span>
-            </div>
-            <button className="danger-button inline" onClick={() => onControl('stop')} type="button" disabled={match.status === 'finished' || match.status === 'stopped'}>
+
+          <div className="poker-room-meta">
+            <span className={`status-pill ${lifecycleStatus.tone}`}>牌桌 {lifecycleStatus.label}</span>
+            <span className="status-pill stage-chip">{match.table.stage.toUpperCase()}</span>
+            <span className="status-pill">第 {match.table.handNumber} 手牌</span>
+            <span className="status-pill">已完成 {match.table.completedHands} 手</span>
+            {dealerPlayer ? <span className="status-pill subtle">D · {dealerPlayer.name}</span> : null}
+          </div>
+
+          <div className="poker-room-actions">
+            <button
+              className="danger-button inline"
+              onClick={() => onControl('stop')}
+              type="button"
+              disabled={match.status === 'finished' || match.status === 'stopped'}
+            >
               终止牌桌
             </button>
           </div>
-        </div>
+        </header>
 
-        <div className="table-surface">
-          <div className="table-headline compact-headline">
-            <div>
-              <strong>第 {match.table.handNumber} 手牌</strong>
-              <span>{match.table.stage.toUpperCase()}</span>
-            </div>
-            <div className="dealer-pill">本手庄家：{dealerPlayer?.name ?? `Seat ${match.table.dealerSeat}`}</div>
-          </div>
-
-          <div className="oval-table">
-            <div className="table-center-stack">
-              <div className="pot-pill hero-pot">底池 {match.table.pot}</div>
-              <div className="board-row center-board">
-                {[0, 1, 2, 3, 4].map((index) => (
-                  <div className="playing-card board" key={index}>
-                    {boardCards[index] ? <CardFace card={boardCards[index]} /> : '—'}
-                  </div>
-                ))}
+        <div className="poker-stage">
+          <div className="poker-table">
+            <div className="poker-table-rim" aria-hidden="true" />
+            <div className="poker-table-felt">
+              <div className="poker-table-logo" aria-hidden="true">
+                HOLDEM<span className="logo-suit">♠</span>
               </div>
-            </div>
 
-            {match.players.map((player, index) => (
-              <div className={`table-seat-card ${player.seat === match.table.currentTurnSeat ? 'active' : ''}`} key={`${match.id}-${player.seat}`} style={seatStyles[index]} data-testid={player.seat === match.table.currentTurnSeat ? 'current-turn-seat' : undefined}>
-                {seatBubble?.seat === player.seat ? (
-                  <div className="seat-bubble" data-testid="seat-bubble">
-                    <strong>{seatBubble.title}</strong>
-                    {seatBubble.detail ? <span>{seatBubble.detail}</span> : null}
-                  </div>
-                ) : null}
-                <div className="seat-topline">
-                  <span className="seat-name">{player.name}</span>
-                  <div className="seat-badges">
-                    {player.seat === match.table.dealerSeat ? <span className="dealer-chip">D</span> : null}
-                    {player.seat === match.table.smallBlindSeat ? <span className="role-chip">SB</span> : null}
-                    {player.seat === match.table.bigBlindSeat ? <span className="role-chip">BB</span> : null}
-                  </div>
+              <div className="poker-table-center">
+                <div className="board-cards">
+                  {[0, 1, 2, 3, 4].map((index) => (
+                    <PokerCard key={`board-${index}`} card={boardCards[index]} size="community" />
+                  ))}
                 </div>
-                <span>{player.chips} 筹码</span>
-                <small>{player.isHuman ? 'Human' : 'AI Seat'}</small>
-                {latestActionBySeat.has(player.seat) ? (
-                  <div className="player-last-action">
-                    最近：{formatSeatActionLabel(latestActionBySeat.get(player.seat)?.action, latestActionBySeat.get(player.seat)?.amount, latestDecisionBySeat.get(player.seat)?.publicReason)}
-                  </div>
-                ) : (
-                  <div className="player-last-action waiting">最近：等待本手动作</div>
-                )}
-                {visibleCardsBySeat.has(player.seat) ? (
-                  <div className="seat-cards">
-                    {(visibleCardsBySeat.get(player.seat) || []).map((card) => (
-                      <span className="mini-card" key={`${player.seat}-${card}`}>
-                        <CardFace card={card} />
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
+                <div className="pot-display">
+                  {match.table.pot > 0 ? <ChipStack amount={match.table.pot} variant="pot" /> : null}
+                  <span className="pot-display-label">底池 {match.table.pot}</span>
+                </div>
               </div>
-            ))}
+            </div>
+
+            {match.players.map((player, index) => {
+              const isCurrentTurn = player.seat === match.table.currentTurnSeat
+              const visibleCards = player.isHuman ? [] : visibleCardsBySeat.get(player.seat) ?? []
+              const folded = seatStatus.folded.has(player.seat)
+              const allIn = seatStatus.allIn.has(player.seat)
+              const isWinner = winnerSeatSet.has(player.seat)
+              const lastEntry = latestActionBySeat.get(player.seat)
+              const lastReason = latestDecisionBySeat.get(player.seat)?.publicReason
+              const lastActionLabel = lastEntry
+                ? formatSeatActionLabel(lastEntry.action, lastEntry.amount, lastReason)
+                : null
+
+              const showFaceDown =
+                !player.isHuman &&
+                !player.eliminated &&
+                !folded &&
+                visibleCards.length === 0 &&
+                match.table.handNumber > 0 &&
+                match.status !== 'stopped' &&
+                match.status !== 'finished'
+
+              return (
+                <PokerSeat
+                  key={`${match.id}-${player.seat}`}
+                  player={player}
+                  style={seatStyles[index]}
+                  isCurrentTurn={isCurrentTurn}
+                  isDealer={player.seat === match.table.dealerSeat}
+                  isSmallBlind={player.seat === match.table.smallBlindSeat}
+                  isBigBlind={player.seat === match.table.bigBlindSeat}
+                  contributedAmount={streetContributionBySeat.get(player.seat) ?? 0}
+                  visibleCards={visibleCards}
+                  showFaceDown={showFaceDown}
+                  isFolded={folded}
+                  isAllIn={allIn}
+                  isWinner={isWinner}
+                  lastActionLabel={lastActionLabel}
+                  bubble={bubble?.seat === player.seat ? { title: bubble.title, detail: bubble.detail } : null}
+                  bubbleDirection={seatStyles[index]?.bubbleDirection}
+                  testIdActive={isCurrentTurn}
+                  bubbleTestId="seat-bubble"
+                />
+              )
+            })}
           </div>
         </div>
 
         {spectatorMode ? (
           <div className="control-bar">
-            <button className="ghost-button" onClick={() => onControl(match.control?.paused ? 'continue' : 'pause')} type="button" disabled={match.status === 'finished' || match.status === 'stopped'}>
+            <button
+              className="ghost-button"
+              onClick={() => onControl(match.control?.paused ? 'continue' : 'pause')}
+              type="button"
+              disabled={match.status === 'finished' || match.status === 'stopped'}
+            >
               {match.control?.paused ? '继续' : '暂停'}
             </button>
-            <button className={`ghost-button ${match.control?.semiAutoMode ? 'is-active' : ''}`} onClick={() => onControl('semi_auto_on')} type="button" disabled={match.status === 'finished' || match.status === 'stopped'}>
+            <button
+              className={`ghost-button ${match.control?.semiAutoMode ? 'is-active' : ''}`}
+              onClick={() => onControl('semi_auto_on')}
+              type="button"
+              disabled={match.status === 'finished' || match.status === 'stopped'}
+            >
               半自动
             </button>
-            <button className={`ghost-button ${!match.control?.semiAutoMode && !match.control?.manualMode ? 'is-active' : ''}`} onClick={() => onControl('auto_on')} type="button" disabled={match.status === 'finished' || match.status === 'stopped'}>
+            <button
+              className={`ghost-button ${!match.control?.semiAutoMode && !match.control?.manualMode ? 'is-active' : ''}`}
+              onClick={() => onControl('auto_on')}
+              type="button"
+              disabled={match.status === 'finished' || match.status === 'stopped'}
+            >
               全自动
             </button>
-            <button className={`ghost-button ${match.control?.manualMode ? 'is-active' : ''}`} onClick={() => onControl('manual_on')} type="button" disabled={match.status === 'finished' || match.status === 'stopped'}>
+            <button
+              className={`ghost-button ${match.control?.manualMode ? 'is-active' : ''}`}
+              onClick={() => onControl('manual_on')}
+              type="button"
+              disabled={match.status === 'finished' || match.status === 'stopped'}
+            >
               手动模式
             </button>
-            <button className="primary-button inline" onClick={() => onControl('step')} type="button" disabled={!match.control?.manualMode || match.status === 'finished' || match.status === 'stopped'}>
+            <button
+              className="primary-button inline"
+              onClick={() => onControl('step')}
+              type="button"
+              disabled={!match.control?.manualMode || match.status === 'finished' || match.status === 'stopped'}
+            >
               下一步
             </button>
-            <button className="primary-button inline" onClick={() => onControl('continue')} type="button" disabled={match.status !== 'hand_complete'}>
+            <button
+              className="primary-button inline"
+              onClick={() => onControl('continue')}
+              type="button"
+              disabled={match.status !== 'hand_complete'}
+            >
               继续下一手
             </button>
           </div>
         ) : null}
 
-        <div className="hero-panel stack-on-mobile">
-          <div>
-            <span className="section-label">{hasHumanPlayer ? '我的手牌' : '观战模式'}</span>
-            <div className="hero-cards">
-              {hasHumanPlayer ? (
-                heroCards.map((card) => (
-                  <div className="playing-card hero" key={card}>
-                    <CardFace card={card} />
-                  </div>
-                ))
-              ) : (
-                <div className="spectator-note">
-                  <strong>{match.control?.manualMode ? '纯 AI 手动逐步观战中' : match.control?.semiAutoMode ? '纯 AI 半自动观战中' : '纯 AI 自动对战中'}</strong>
-                  <p>{match.control?.manualMode ? '当前会在每次 AI 决策前停下，需要你点“下一步”才会继续。' : match.control?.semiAutoMode ? '当前会把这一手自动打完，但在分出赢家后停下，等待你继续下一手。' : '当前桌面没有真人座位，系统会自动推进所有 AI 行动，你只需要旁观和回放。'} </p>
+        {hasHumanPlayer ? (
+          <footer className="hero-footer">
+            <div className="hero-footer-cards">
+              <span className="section-label">我的手牌</span>
+              <div className="hero-cards">
+                {heroCards.length > 0 ? (
+                  heroCards.map((card, idx) => <PokerCard key={`hero-${card}-${idx}`} card={card} size="hero" />)
+                ) : (
+                  <>
+                    <PokerCard faceDown size="hero" />
+                    <PokerCard faceDown size="hero" />
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="hero-footer-actions">
+              <span className="section-label">当前可选动作</span>
+              <div className="action-pills">
+                {legalActions
+                  .filter((option) => option.action !== 'raise')
+                  .map((option) => (
+                    <button
+                      key={`${option.action}-${option.amount ?? 0}`}
+                      className="action-pill"
+                      onClick={() => onAction(option.action, option.amount)}
+                      disabled={actionPending}
+                      type="button"
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+              </div>
+
+              {raiseAction ? (
+                <div className="raise-box">
+                  <input
+                    type="number"
+                    min={match.table.minimumRaiseTo || raiseAction.amount || 0}
+                    max={match.players.find((p) => p.isHuman)?.chips || raiseAction.amount || 0}
+                    value={raiseAmount}
+                    onChange={(event) => setRaiseAmount(Number(event.target.value) || 0)}
+                  />
+                  <button
+                    className="primary-button inline"
+                    disabled={actionPending}
+                    onClick={() => onAction('raise', raiseAmount)}
+                    type="button"
+                  >
+                    自定义加注
+                  </button>
                 </div>
-              )}
+              ) : null}
+
+              {match.status === 'hand_complete' ? (
+                <div className="raise-box">
+                  <button className="primary-button inline" onClick={() => onControl('continue')} type="button">
+                    继续下一手
+                  </button>
+                </div>
+              ) : null}
+
+              {legalActions.length === 0 && match.status !== 'hand_complete' ? (
+                <span className="action-hint">当前等待 AI 行动或手牌结算。</span>
+              ) : null}
             </div>
-          </div>
-
-          <div className="action-column">
-            <span className="section-label">{hasHumanPlayer ? '当前可选动作' : '当前状态'}</span>
-            <div className="action-pills">
-              {hasHumanPlayer
-                ? legalActions
-                    .filter((option) => option.action !== 'raise')
-                    .map((option) => (
-                      <button
-                        className="action-pill"
-                        key={`${option.action}-${option.amount ?? 0}`}
-                        onClick={() => onAction(option.action, option.amount)}
-                        disabled={actionPending}
-                        type="button"
-                      >
-                        {option.label}
-                      </button>
-                    ))
-                : null}
+          </footer>
+        ) : (
+          <footer className="hero-footer spectator-footer">
+            <div className="spectator-note">
+              <strong>{spectatorTitleFor(match)}</strong>
+              <p>{spectatorDescFor(match)}</p>
             </div>
+          </footer>
+        )}
 
-            {hasHumanPlayer && raiseAction ? (
-              <div className="raise-box">
-                <input
-                  type="number"
-                  min={match.table.minimumRaiseTo || raiseAction.amount || 0}
-                  max={match.players.find((player) => player.isHuman)?.chips || raiseAction.amount || 0}
-                  value={raiseAmount}
-                  onChange={(event) => setRaiseAmount(Number(event.target.value) || 0)}
-                />
-                <button className="primary-button inline" disabled={actionPending} onClick={() => onAction('raise', raiseAmount)} type="button">
-                  自定义加注
-                </button>
-              </div>
-            ) : null}
-
-            {!hasHumanPlayer ? <span className="action-hint">{match.control?.manualMode ? '当前是手动逐步观战：每次 AI 决策都要你点“下一步”。' : match.control?.semiAutoMode ? '当前是半自动观战：每手分出赢家后会停下，等你点“继续下一手”。' : '系统会自动推进到下一手或比赛结束。'} </span> : null}
-            {hasHumanPlayer && match.status === 'hand_complete' ? (
-              <div className="raise-box">
-                <button className="primary-button inline" onClick={() => onControl('continue')} type="button">
-                  继续下一手
-                </button>
-              </div>
-            ) : null}
-            {hasHumanPlayer && legalActions.length === 0 && match.status !== 'hand_complete' ? <span className="action-hint">当前等待 AI 行动或手牌结算。</span> : null}
-          </div>
-        </div>
-
-        {match.table.lastWinners?.length ? <p className="winner-banner">上一手获胜：{match.table.lastWinners.join(' / ')}</p> : null}
+        {lastWinners.length > 0 ? <p className="winner-banner">上一手获胜：{lastWinners.join(' / ')}</p> : null}
         {match.winnerName ? <p className="winner-banner champion">整场冠军：{match.winnerName}</p> : null}
-      </div>
+      </section>
 
-      <aside className="card panel event-panel">
-        <div className="panel-header compact">
-          <div>
-            <h2>实时轨迹</h2>
-            <p>{spectatorMode ? '先看最近一步，再看模型思考与动作历史。' : '人机对战时这里只展示动作，不展示 AI 思考。'}</p>
-          </div>
-          <span className="status-pill">已完成 {match.table.completedHands} 手</span>
-        </div>
-
+      <aside className="card panel poker-sidebar">
         <article className={`turn-status-card ${turnStatus.tone}`}>
           <div className="decision-header">
             <strong>{turnStatus.title}</strong>
@@ -282,7 +375,14 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
               <strong>最近动作</strong>
               <span>{latestMeaningfulAction.street.toUpperCase()}</span>
             </div>
-            <p>{describeLatestAction(latestMeaningfulAction.playerName, latestMeaningfulAction.action, latestMeaningfulAction.amount, latestDecisionBySeat.get(latestMeaningfulAction.seat)?.publicReason)}</p>
+            <p>
+              {describeLatestAction(
+                latestMeaningfulAction.playerName,
+                latestMeaningfulAction.action,
+                latestMeaningfulAction.amount,
+                latestDecisionBySeat.get(latestMeaningfulAction.seat)?.publicReason,
+              )}
+            </p>
           </article>
         ) : null}
 
@@ -298,65 +398,44 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
           </article>
         ) : null}
 
-        <div className="telemetry-strip">
-          <div>
-            <span>当前阶段</span>
-            <strong>{match.table.stage.toUpperCase()}</strong>
+        <div className="action-feed">
+          <div className="feed-header">
+            <strong>动作流</strong>
+            <span>{spectatorMode ? '动作 + 模型思考（最新在最上）' : '人机对战不显示思考内容'}</span>
           </div>
-          <div>
-            <span>轮到座位</span>
-            <strong>{match.table.currentTurnSeat >= 0 ? currentActor?.name ?? `Seat ${match.table.currentTurnSeat}` : '结算中'}</strong>
+          <div className="feed-list">
+            {spectatorMode
+              ? latestDecisionLog.map((entry, index) => (
+                  <article className="feed-item is-thought" key={`thought-${entry.playerName}-${index}-${entry.stage}`}>
+                    <div className="feed-item-head">
+                      <strong>{entry.playerName}</strong>
+                      <span>
+                        {entry.stage.toUpperCase()} · {entry.action}
+                        {entry.amount ? ` ${entry.amount}` : ''}
+                      </span>
+                    </div>
+                    <p>{entry.privateReason || entry.publicReason || '无额外思考说明'}</p>
+                  </article>
+                ))
+              : null}
+
+            {latestActionLog.map((entry, index) => (
+              <div className="feed-item is-action" key={`action-${entry.playerName}-${index}`}>
+                <strong>{entry.playerName}</strong>
+                <span>{formatFeedAction(entry.action, entry.amount)}</span>
+              </div>
+            ))}
+
+            {events.map((event) => (
+              <div className="feed-item is-event" key={`event-${event.sequence}`}>
+                <strong>{event.type}</strong>
+                <span>#{event.sequence}</span>
+              </div>
+            ))}
           </div>
-          <div>
-            <span>可见事件</span>
-            <strong>{events.length}</strong>
-          </div>
-        </div>
-
-        <div className="timeline tall">
-          {spectatorMode
-            ? latestDecisionLog.map((entry, index) => (
-                <article className="decision-card" key={`${entry.playerName}-${index}-${entry.stage}`}>
-                  <div className="decision-header">
-                    <strong>{entry.playerName}</strong>
-                    <span>
-                      {entry.stage.toUpperCase()} · {entry.action}
-                      {entry.amount ? ` ${entry.amount}` : ''}
-                    </span>
-                  </div>
-                  <p>{entry.privateReason || entry.publicReason || '无额外思考说明'}</p>
-                </article>
-              ))
-            : null}
-
-          {latestActionLog.map((entry, index) => (
-            <div className="timeline-item" key={`${entry.playerName}-${index}`}>
-              <strong>{entry.playerName}</strong>
-              <span>
-                {entry.action} · {entry.amount}
-              </span>
-            </div>
-          ))}
-
-          {events.map((event) => (
-            <div className="timeline-item subtle" key={event.sequence}>
-              <strong>{event.type}</strong>
-              <span>#{event.sequence}</span>
-            </div>
-          ))}
         </div>
       </aside>
     </div>
-  )
-}
-
-function CardFace({ card }: { card: string }) {
-  const parts = cardParts(card)
-  return (
-    <span className={isRedCard(card) ? 'card-face red' : 'card-face'}>
-      <span className="card-rank">{parts.rank}</span>
-      <span className="card-suit">{parts.suit}</span>
-    </span>
   )
 }
 
@@ -369,7 +448,6 @@ function describeTurnStatus(match: MatchSnapshot, spectatorMode: boolean, curren
       tone: 'finished',
     }
   }
-
   if (match.status === 'stopped') {
     return {
       label: '已终止',
@@ -378,7 +456,6 @@ function describeTurnStatus(match: MatchSnapshot, spectatorMode: boolean, curren
       tone: 'stopped',
     }
   }
-
   if (spectatorMode && match.control?.paused) {
     return {
       label: '已暂停',
@@ -387,25 +464,28 @@ function describeTurnStatus(match: MatchSnapshot, spectatorMode: boolean, curren
       tone: 'paused',
     }
   }
-
   if (spectatorMode && match.control?.semiAutoMode && match.status === 'hand_complete') {
     return {
       label: '半自动停点',
       title: match.table.lastWinners?.length ? `本手赢家：${match.table.lastWinners.join(' / ')}` : '本手已经结束',
-      detail: (match.table.visibleHoleCards?.length ?? 0) > 0 ? '这一手已经摊牌，亮出的手牌会显示在桌面座位上。点击“继续下一手”后，系统才会开始下一手。' : '这一手已经分出赢家。点击“继续下一手”后，系统才会开始下一手。',
+      detail:
+        (match.table.visibleHoleCards?.length ?? 0) > 0
+          ? '这一手已经摊牌，亮出的手牌会显示在桌面座位上。点击“继续下一手”后，系统才会开始下一手。'
+          : '这一手已经分出赢家。点击“继续下一手”后，系统才会开始下一手。',
       tone: 'semi',
     }
   }
-
   if (match.status === 'hand_complete') {
     return {
       label: '本手结束',
       title: match.table.lastWinners?.length ? `本手赢家：${match.table.lastWinners.join(' / ')}` : '本手已经结束',
-      detail: (match.table.visibleHoleCards?.length ?? 0) > 0 ? '这一手已经摊牌，AI 的亮牌会显示在桌面座位上。看完结果后，点击“继续下一手”。' : '这一手已经分出赢家。看完结果后，点击“继续下一手”开始下一轮。',
+      detail:
+        (match.table.visibleHoleCards?.length ?? 0) > 0
+          ? '这一手已经摊牌，AI 的亮牌会显示在桌面座位上。看完结果后，点击“继续下一手”。'
+          : '这一手已经分出赢家。看完结果后，点击“继续下一手”开始下一轮。',
       tone: 'semi',
     }
   }
-
   if (spectatorMode && match.control?.manualMode && !match.control?.running) {
     return {
       label: '手动模式',
@@ -414,7 +494,6 @@ function describeTurnStatus(match: MatchSnapshot, spectatorMode: boolean, curren
       tone: 'manual',
     }
   }
-
   if (match.status === 'awaiting_human') {
     return {
       label: '等待你',
@@ -423,16 +502,18 @@ function describeTurnStatus(match: MatchSnapshot, spectatorMode: boolean, curren
       tone: 'human',
     }
   }
-
   if (match.status === 'awaiting_ai') {
     return {
       label: '等待 AI',
       title: currentActorName ? `正在等待 ${currentActorName} 操作` : '正在等待 AI 操作',
-      detail: spectatorMode ? match.control?.semiAutoMode ? '系统正在打这一手；等这一手分出赢家后会自动停下。' : '系统正在请求 AI 决策；如果没暂停，它会自动继续。': '系统正在请求 AI 决策。',
+      detail: spectatorMode
+        ? match.control?.semiAutoMode
+          ? '系统正在打这一手；等这一手分出赢家后会自动停下。'
+          : '系统正在请求 AI 决策；如果没暂停，它会自动继续。'
+        : '系统正在请求 AI 决策。',
       tone: 'ai',
     }
   }
-
   return {
     label: '处理中',
     title: '牌局正在推进',
@@ -454,6 +535,22 @@ function describeLifecycleStatus(match: MatchSnapshot) {
   return { label: '进行中', tone: 'running' }
 }
 
+function spectatorTitleFor(match: MatchSnapshot) {
+  if (match.control?.manualMode) return '纯 AI 手动逐步观战中'
+  if (match.control?.semiAutoMode) return '纯 AI 半自动观战中'
+  return '纯 AI 自动对战中'
+}
+
+function spectatorDescFor(match: MatchSnapshot) {
+  if (match.control?.manualMode) {
+    return '当前是手动逐步观战：每次 AI 决策都要你点“下一步”。'
+  }
+  if (match.control?.semiAutoMode) {
+    return '当前是半自动观战：每手分出赢家后会停下，等你点“继续下一手”。'
+  }
+  return '系统会自动推进到下一手或比赛结束。'
+}
+
 function describeLatestAction(playerName: string, action: string, amount: number, publicReason?: string) {
   if (isRequestFailureReason(publicReason) && action === 'fold') {
     return `${playerName} 因请求出错自动 fold。`
@@ -462,7 +559,7 @@ function describeLatestAction(playerName: string, action: string, amount: number
 }
 
 function formatSeatActionLabel(action?: string, amount?: number, publicReason?: string) {
-  if (!action) return '等待本手动作'
+  if (!action) return null
   if (isRequestFailureReason(publicReason) && action === 'fold') {
     return '因请求出错自动 fold'
   }
@@ -475,16 +572,21 @@ function formatSeatActionLabel(action?: string, amount?: number, publicReason?: 
   return `${action}${amount ? ` ${amount}` : ''}`
 }
 
-function buildLiveSeatBubble(
-  latestAction: { seat: number; playerName: string; action: string; amount: number; street: string } | undefined,
-  latestDecision: MatchSnapshot['table']['decisionLog'][number] | undefined,
-): SeatBubble | null {
-  if (!latestAction) return null
+function formatFeedAction(action: string, amount: number) {
+  if (action === 'post_small_blind') return amount ? `small · ${amount}` : 'small'
+  if (action === 'post_big_blind') return amount ? `big · ${amount}` : 'big'
+  return amount ? `${action} · ${amount}` : action
+}
 
+function buildLiveSeatBubble(
+  latestAction: ActionLog | undefined,
+  latestDecision: DecisionEntry | undefined,
+): LiveBubble | null {
+  if (!latestAction) return null
   return {
     key: `${latestAction.seat}-${latestAction.action}-${latestAction.amount}-${latestAction.street}`,
     seat: latestAction.seat,
-    title: formatSeatActionLabel(latestAction.action, latestAction.amount, latestDecision?.publicReason),
+    title: formatSeatActionLabel(latestAction.action, latestAction.amount, latestDecision?.publicReason) ?? latestAction.action,
   }
 }
 

@@ -214,6 +214,39 @@ describe('App flow', () => {
     expect(apiMocks.createMatch.mock.calls[0][0].aiPlayerNames).toEqual(['老鲨鱼'])
   })
 
+  it('numbers every duplicate AI seat as #1 / #2 when only one preset is available', async () => {
+    apiMocks.fetchPresets.mockResolvedValue([
+      { id: 'a', name: 'Benchmark A', endpoint: 'https://api.deepseek.com', model: 'deepseek-v4-flash', systemPrompt: 'benchmark' },
+    ])
+
+    render(<App />)
+
+    await screen.findByText('建桌设置')
+    await userEvent.click(screen.getByRole('button', { name: '纯 AI 观战' }))
+
+    expect(screen.getByDisplayValue('Benchmark A #1')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Benchmark A #2')).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('Benchmark A')).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue('Benchmark A 2')).not.toBeInTheDocument()
+  })
+
+  it('keeps a user-edited AI name when other seats are added or removed', async () => {
+    apiMocks.fetchPresets.mockResolvedValue([
+      { id: 'a', name: 'Benchmark A', endpoint: 'https://api.deepseek.com', model: 'deepseek-v4-flash', systemPrompt: 'benchmark' },
+      { id: 'b', name: 'Benchmark B', endpoint: 'https://api.deepseek.com', model: 'deepseek-v4-flash', systemPrompt: 'benchmark' },
+    ])
+
+    render(<App />)
+
+    await screen.findByText('建桌设置')
+    await userEvent.clear(screen.getByDisplayValue('Benchmark A'))
+    await userEvent.type(screen.getByPlaceholderText('给这个 AI 起个名字'), '小狐狸')
+    await userEvent.click(screen.getByRole('button', { name: '+ 添加 AI' }))
+
+    expect(screen.getByDisplayValue('小狐狸')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Benchmark B')).toBeInTheDocument()
+  })
+
   it('prefers the next preset instead of duplicating A when adding a new AI seat', async () => {
     apiMocks.fetchPresets.mockResolvedValue([
       { id: 'a', name: 'Benchmark A', endpoint: 'https://api.deepseek.com', model: 'deepseek-v4-flash', systemPrompt: 'benchmark' },

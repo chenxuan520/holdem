@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { cardParts, isRedCard } from '../lib/cards'
+import { PokerCard } from '../components/PokerCard'
+import { ChipStack } from '../components/PokerChips'
+import { PokerSeat } from '../components/PokerSeat'
 import { blindSeatsForReplay, seatLayout } from '../lib/tableLayout'
 import type { AILog, ReplayDetail, ReplayEvent, ReplayHand, ReplayPlayerState } from '../lib/types'
 
@@ -20,9 +22,9 @@ type ReplayStep = {
   detail: string
 }
 
-type SeatBubble = {
-  key: string
+type ReplayBubble = {
   seat: number
+  key: string
   title: string
   detail?: string
 }
@@ -30,7 +32,7 @@ type SeatBubble = {
 export function ReplayView({ replay, loading }: Props) {
   const [selectedHandIndex, setSelectedHandIndex] = useState(0)
   const [selectedStepIndex, setSelectedStepIndex] = useState(0)
-  const [seatBubble, setSeatBubble] = useState<SeatBubble | null>(null)
+  const [bubble, setBubble] = useState<ReplayBubble | null>(null)
 
   const hands = useMemo(() => asArray(replay?.hands), [replay])
   const hand = useMemo(() => hands[selectedHandIndex] ?? null, [hands, selectedHandIndex])
@@ -42,23 +44,54 @@ export function ReplayView({ replay, loading }: Props) {
   const seatStyles = useMemo(() => seatLayout(Math.max(2, handPlayers.length)), [handPlayers.length])
   const winnerSeats = useMemo(() => new Set(handWinners.map((winner) => winner.seat)), [handWinners])
   const dealerSeat = hand?.dealerSeat ?? -1
-  const blindSeats = useMemo(() => blindSeatsForReplay(handPlayers.map((player) => player.seat), dealerSeat), [handPlayers, dealerSeat])
+  const blindSeats = useMemo(
+    () => blindSeatsForReplay(handPlayers.map((player) => player.seat), dealerSeat),
+    [handPlayers, dealerSeat],
+  )
 
-  const latestActionBySeat = useMemo(() => {
-    const map = new Map<number, { action: string; amount?: number; publicReason?: string | null }>()
-    for (let index = Math.min(selectedStepIndex, steps.length - 1); index >= 0; index -= 1) {
-      const payload = asRecord(steps[index]?.event.payload)
-      const seat = typeof payload.seat === 'number' ? payload.seat : null
-      const action = typeof payload.action === 'string' ? payload.action : null
-      if (seat === null || !action || map.has(seat)) continue
-      map.set(seat, {
-        action,
-        amount: typeof payload.amount === 'number' ? payload.amount : undefined,
-        publicReason: readText(payload.publicReason),
-      })
+  const seatStateUntilStep = useMemo(() => {
+    const folded = new Set<number>()
+    const allIn = new Set<number>()
+    const lastAction = new Map<number, { action: string; amount?: number; publicReason?: string | null; stage?: string | null }>()
+    const streetContribution = new Map<number, number>()
+    let currentStreet: string | null = null
+
+    if (!hand) {
+      return { folded, allIn, lastAction, streetContribution, currentStreet }
     }
-    return map
-  }, [selectedStepIndex, steps])
+
+    const limit = Math.min(selectedStepIndex, steps.length - 1)
+    for (let index = 0; index <= limit && index < steps.length; index += 1) {
+      const step = steps[index]
+      const payload = asRecord(step.event.payload)
+      const seat = readNumber(payload.seat)
+      const action = readText(payload.action)
+      const amount = readNumber(payload.amount)
+      const publicReason = readText(payload.publicReason)
+
+      if (step.event.type === 'board_cards_dealt') {
+        const stage = readText(payload.stage)
+        if (stage) {
+          currentStreet = stage
+          streetContribution.clear()
+        }
+      }
+
+      if (seat !== null && action) {
+        if (action === 'fold') folded.add(seat)
+        if (action === 'all_in') allIn.add(seat)
+        if (amount && amount > 0 && step.event.type !== 'ai_decision_recorded') {
+          streetContribution.set(seat, (streetContribution.get(seat) ?? 0) + amount)
+        }
+        if (step.event.type !== 'ai_decision_recorded') {
+          const stage = readText(payload.stage) ?? readText(payload.street) ?? currentStreet
+          lastAction.set(seat, { action, amount: amount ?? undefined, publicReason, stage })
+        }
+      }
+    }
+
+    return { folded, allIn, lastAction, streetContribution, currentStreet }
+  }, [hand, steps, selectedStepIndex])
 
   useEffect(() => {
     setSelectedHandIndex(0)
@@ -75,6 +108,20 @@ export function ReplayView({ replay, loading }: Props) {
     }
   }, [selectedStepIndex, steps.length])
 
+  const currentStepBubble = useMemo(() => buildReplaySeatBubble(currentStep), [currentStep])
+
+  useEffect(() => {
+    if (!currentStepBubble) {
+      setBubble(null)
+      return
+    }
+    setBubble(currentStepBubble)
+    const timeout = window.setTimeout(() => {
+      setBubble((current) => (current?.key === currentStepBubble.key ? null : current))
+    }, 3000)
+    return () => window.clearTimeout(timeout)
+  }, [currentStepBubble])
+
   if (loading) {
     return <div className="empty-state small card panel">正在加载回放...</div>
   }
@@ -88,31 +135,19 @@ export function ReplayView({ replay, loading }: Props) {
     )
   }
 
-  const currentThought = currentStep?.decisionPayload
   const currentLog = currentStep?.linkedLog
+  const currentThought = currentStep?.decisionPayload
   const thoughtText = readText(currentThought?.privateReason) || readText(currentThought?.publicReason) || null
-  const currentStepBubble = useMemo(() => buildReplaySeatBubble(currentStep), [currentStep])
-
-  useEffect(() => {
-    if (!currentStepBubble) {
-      setSeatBubble(null)
-      return
-    }
-
-    setSeatBubble(currentStepBubble)
-    const timeout = window.setTimeout(() => {
-      setSeatBubble((current) => (current?.key === currentStepBubble.key ? null : current))
-    }, 3000)
-    return () => window.clearTimeout(timeout)
-  }, [currentStepBubble])
 
   return (
     <div className="replay-layout">
-      <section className="card panel replay-main">
+      <section className="poker-room replay-room card panel">
         <div className="panel-header compact">
           <div>
             <h2>回放牌桌</h2>
-            <p>冠军：{replay.summary.winnerName || '未决出'} · 共 {replay.summary.handsPlayed} 手</p>
+            <p>
+              冠军：{replay.summary.winnerName || '未决出'} · 共 {replay.summary.handsPlayed} 手
+            </p>
           </div>
           <span className="status-pill">{hands.length} 手牌</span>
         </div>
@@ -120,13 +155,15 @@ export function ReplayView({ replay, loading }: Props) {
         <div className="replay-hand-strip" role="tablist" aria-label="手牌列表">
           {hands.map((item, index) => (
             <button
-              className={`history-card selectable replay-hand-chip ${index === selectedHandIndex ? 'selected' : ''}`}
+              className={`replay-hand-chip history-card selectable ${index === selectedHandIndex ? 'selected' : ''}`}
               key={item.handNumber}
               onClick={() => setSelectedHandIndex(index)}
               type="button"
             >
               <strong>第 {item.handNumber} 手</strong>
-              <span className="replay-hand-chip-winner">{asArray(item.winners).map((winner) => winner.playerName).join(' / ') || '待定'}</span>
+              <span className="replay-hand-chip-winner">
+                {asArray(item.winners).map((winner) => winner.playerName).join(' / ') || '待定'}
+              </span>
               <span className="replay-hand-chip-meta">底池 {item.pot}</span>
             </button>
           ))}
@@ -134,103 +171,130 @@ export function ReplayView({ replay, loading }: Props) {
 
         {hand ? (
           <>
+            <h3 className="replay-hand-caption">第 {hand.handNumber} 手牌回放</h3>
             <div className="replay-step-controls">
               <div className="replay-step-meta">
                 <strong>
-                  第 {hand.handNumber} 手 · 步骤 {steps.length === 0 ? 0 : selectedStepIndex + 1}/{Math.max(steps.length, 1)}
+                  步骤 {steps.length === 0 ? 0 : selectedStepIndex + 1}/{Math.max(steps.length, 1)}
                 </strong>
                 <span>{currentStep?.title || '本手总览'}</span>
               </div>
               <div className="control-bar compact">
-                <button className="ghost-button" onClick={() => setSelectedStepIndex(0)} type="button" disabled={selectedStepIndex <= 0}>
+                <button
+                  className="ghost-button"
+                  onClick={() => setSelectedStepIndex(0)}
+                  type="button"
+                  disabled={selectedStepIndex <= 0}
+                >
                   第一步
                 </button>
-                <button className="ghost-button" onClick={() => setSelectedStepIndex((current) => Math.max(current - 1, 0))} type="button" disabled={selectedStepIndex <= 0}>
+                <button
+                  className="ghost-button"
+                  onClick={() => setSelectedStepIndex((current) => Math.max(current - 1, 0))}
+                  type="button"
+                  disabled={selectedStepIndex <= 0}
+                >
                   上一步
                 </button>
-                <button className="ghost-button" onClick={() => setSelectedStepIndex((current) => Math.min(current + 1, Math.max(steps.length - 1, 0)))} type="button" disabled={selectedStepIndex >= steps.length - 1}>
+                <button
+                  className="ghost-button"
+                  onClick={() => setSelectedStepIndex((current) => Math.min(current + 1, Math.max(steps.length - 1, 0)))}
+                  type="button"
+                  disabled={selectedStepIndex >= steps.length - 1}
+                >
                   下一步
                 </button>
-                <button className="ghost-button" onClick={() => setSelectedStepIndex(Math.max(steps.length - 1, 0))} type="button" disabled={selectedStepIndex >= steps.length - 1}>
+                <button
+                  className="ghost-button"
+                  onClick={() => setSelectedStepIndex(Math.max(steps.length - 1, 0))}
+                  type="button"
+                  disabled={selectedStepIndex >= steps.length - 1}
+                >
                   最后一步
                 </button>
               </div>
             </div>
 
-            <div className="table-surface replay-surface">
-              <div className="table-headline compact-headline">
-                <div>
-                  <strong>第 {hand.handNumber} 手牌回放</strong>
-                  <span>{currentStep?.detail || '这里会按时间顺序重放这一手的关键步骤。'}</span>
-                </div>
-                <div className="dealer-pill">
-                  本手庄家：{handPlayers.find((player) => player.seat === dealerSeat)?.name ?? `Seat ${dealerSeat}`}
-                </div>
-              </div>
-
-              <div className="oval-table replay-table">
-                <div className="table-center-stack">
-                  <div className="pot-pill hero-pot">底池 {hand.pot}</div>
-                  <div className="board-row center-board">
-                    {[0, 1, 2, 3, 4].map((index) => (
-                      <div className="playing-card board" key={`${hand.handNumber}-${index}`}>
-                        {currentBoard[index] ? <CardFace card={currentBoard[index]} /> : '—'}
-                      </div>
-                    ))}
+            <div className="poker-stage replay-stage">
+              <div className="poker-table replay-poker-table">
+                <div className="poker-table-rim" aria-hidden="true" />
+                <div className="poker-table-felt">
+                  <div className="poker-table-logo" aria-hidden="true">
+                    REPLAY<span className="logo-suit">♥</span>
                   </div>
-                </div>
 
-                {handPlayers.map((player, index) => (
-                  <div
-                    className={`table-seat-card replay-seat-card ${player.seat === currentStep?.actorSeat ? 'active' : ''} ${winnerSeats.has(player.seat) ? 'winner' : ''}`}
-                    key={`replay-${hand.handNumber}-${player.seat}`}
-                    style={seatStyles[index]}
-                  >
-                    {seatBubble?.seat === player.seat ? (
-                      <div className="seat-bubble" data-testid="replay-seat-bubble">
-                        <strong>{seatBubble.title}</strong>
-                        {seatBubble.detail ? <span>{seatBubble.detail}</span> : null}
-                      </div>
-                    ) : null}
-                    <div className="seat-topline">
-                      <span className="seat-name">{player.name}</span>
-                      <div className="seat-badges">
-                        {player.seat === dealerSeat ? <span className="dealer-chip">D</span> : null}
-                        {player.seat === blindSeats.smallBlindSeat ? <span className="role-chip">SB</span> : null}
-                        {player.seat === blindSeats.bigBlindSeat ? <span className="role-chip">BB</span> : null}
-                      </div>
-                    </div>
-                    <span>
-                      {player.startingChips} → {player.endingChips}
-                    </span>
-                    <small>{describeReplaySeatState(player, winnerSeats.has(player.seat))}</small>
-                    <div className="seat-cards">
-                      {asArray(player.holeCards).map((card) => (
-                        <span className="mini-card" key={`${player.seat}-${card}`}>
-                          <CardFace card={card} />
-                        </span>
+                  <div className="poker-table-center">
+                    <div className="board-cards">
+                      {[0, 1, 2, 3, 4].map((index) => (
+                        <PokerCard
+                          key={`replay-board-${hand.handNumber}-${index}`}
+                          card={currentBoard[index]}
+                          size="community"
+                        />
                       ))}
                     </div>
-                    {latestActionBySeat.has(player.seat) ? (
-                      <div className="player-last-action">
-                        最近：{formatReplayActionLabel(latestActionBySeat.get(player.seat)?.action, latestActionBySeat.get(player.seat)?.amount, latestActionBySeat.get(player.seat)?.publicReason)}
-                      </div>
-                    ) : (
-                      <div className="player-last-action waiting">最近：等待本手动作</div>
-                    )}
+                    <div className="pot-display">
+                      <ChipStack amount={hand.pot} variant="pot" />
+                      <span className="pot-display-label">底池 {hand.pot}</span>
+                    </div>
                   </div>
-                ))}
+                </div>
+
+                {handPlayers.map((player, index) => {
+                  const lastEntry = seatStateUntilStep.lastAction.get(player.seat)
+                  const folded = seatStateUntilStep.folded.has(player.seat)
+                  const allIn = seatStateUntilStep.allIn.has(player.seat) || player.allIn
+                  const isWinner = winnerSeats.has(player.seat)
+                  const isCurrentTurn = player.seat === currentStep?.actorSeat
+                  const lastActionLabel = lastEntry
+                    ? formatReplayActionLabel(lastEntry.action, lastEntry.amount, lastEntry.publicReason)
+                    : null
+                  return (
+                    <PokerSeat
+                      key={`replay-seat-${hand.handNumber}-${player.seat}`}
+                      player={{
+                        seat: player.seat,
+                        name: player.name,
+                        chips: player.endingChips,
+                        isHuman: player.isHuman,
+                        presetId: player.presetId,
+                        eliminated: player.eliminated,
+                      }}
+                      style={seatStyles[index]}
+                      isCurrentTurn={isCurrentTurn}
+                      isDealer={player.seat === dealerSeat}
+                      isSmallBlind={player.seat === blindSeats.smallBlindSeat}
+                      isBigBlind={player.seat === blindSeats.bigBlindSeat}
+                      contributedAmount={seatStateUntilStep.streetContribution.get(player.seat) ?? 0}
+                      visibleCards={asArray(player.holeCards)}
+                      showFaceDown={false}
+                      isFolded={folded || player.folded}
+                      isAllIn={allIn}
+                      isWinner={isWinner}
+                      lastActionLabel={lastActionLabel}
+                      bubble={bubble?.seat === player.seat ? { title: bubble.title, detail: bubble.detail } : null}
+                      bubbleDirection={seatStyles[index]?.bubbleDirection}
+                      bubbleTestId="replay-seat-bubble"
+                      startingChips={player.startingChips}
+                      endingChips={player.endingChips}
+                    />
+                  )
+                })}
               </div>
             </div>
 
-            {handWinners.length > 0 ? <p className="winner-banner">本手赢家：{handWinners.map((winner) => `${winner.playerName} · ${winner.handLabel}`).join(' / ')}</p> : null}
+            {handWinners.length > 0 ? (
+              <p className="winner-banner">
+                本手赢家：{handWinners.map((winner) => `${winner.playerName} · ${winner.handLabel}`).join(' / ')}
+              </p>
+            ) : null}
           </>
         ) : (
           <div className="empty-state small card panel">当前没有可显示的手牌。</div>
         )}
       </section>
 
-      <aside className="card panel event-panel replay-sidebar">
+      <aside className="card panel poker-sidebar replay-sidebar">
         <div className="panel-header compact">
           <div>
             <h2>当前步骤</h2>
@@ -275,9 +339,14 @@ export function ReplayView({ replay, loading }: Props) {
           </article>
         ) : null}
 
-        <div className="timeline tall replay-step-list">
+        <div className="action-feed replay-step-list">
           {steps.map((step, index) => (
-            <button className={`timeline-item replay-step-button ${index === selectedStepIndex ? 'selected' : ''}`} key={`${step.event.sequence}-${index}`} onClick={() => setSelectedStepIndex(index)} type="button">
+            <button
+              className={`feed-item replay-step-button ${index === selectedStepIndex ? 'selected' : ''}`}
+              key={`${step.event.sequence}-${index}`}
+              onClick={() => setSelectedStepIndex(index)}
+              type="button"
+            >
               <div>
                 <strong>{step.title}</strong>
                 <small>{step.detail}</small>
@@ -369,15 +438,6 @@ function buildReplaySteps(hand: ReplayHand | null, replay: ReplayDetail | null):
   return steps
 }
 
-function describeReplaySeatState(player: ReplayPlayerState, winner: boolean) {
-  const labels = [player.isHuman ? 'Human' : 'AI Seat']
-  if (winner) labels.push('本手赢家')
-  if (player.folded) labels.push('已弃牌')
-  if (player.allIn) labels.push('全下')
-  if (player.eliminated) labels.push('已出局')
-  return labels.join(' · ')
-}
-
 function describeReplayEvent(event: ReplayEvent, payload: Record<string, unknown>) {
   const playerName = readText(payload.playerName)
   const action = readText(payload.action)
@@ -400,11 +460,20 @@ function describeReplayEvent(event: ReplayEvent, payload: Record<string, unknown
       if (isRequestFailureReason(publicReason) && action === 'fold') {
         return { title: `${playerName || 'AI'} 执行动作`, detail: '因请求出错，系统自动执行 fold。' }
       }
-      return { title: `${playerName || 'AI'} 执行动作`, detail: action ? `${action}${amount ? ` ${amount}` : ''}` : '已提交动作。' }
+      return {
+        title: `${playerName || 'AI'} 执行动作`,
+        detail: action ? `${action}${amount ? ` ${amount}` : ''}` : '已提交动作。',
+      }
     case 'player_acted':
-      return { title: `${playerName || '玩家'} 执行动作`, detail: action ? `${action}${amount ? ` ${amount}` : ''}` : '已提交动作。' }
+      return {
+        title: `${playerName || '玩家'} 执行动作`,
+        detail: action ? `${action}${amount ? ` ${amount}` : ''}` : '已提交动作。',
+      }
     case 'board_cards_dealt':
-      return { title: '公共牌发出', detail: `${readText(payload.stage)?.toUpperCase() || '下一街'}：${formatCards(readCardArray(payload.board)) || '暂无公共牌'}` }
+      return {
+        title: '公共牌发出',
+        detail: `${readText(payload.stage)?.toUpperCase() || '下一街'}：${formatCards(readCardArray(payload.board)) || '暂无公共牌'}`,
+      }
     case 'showdown_revealed':
       return { title: '摊牌', detail: winners.length ? `亮牌并结算：${winners.join(' / ')}` : '本手进入摊牌。' }
     case 'hand_settled':
@@ -452,7 +521,7 @@ function formatCards(cards: string[] | null) {
 }
 
 function formatReplayActionLabel(action?: string, amount?: number, publicReason?: string | null) {
-  if (!action) return '等待本手动作'
+  if (!action) return null
   if (isRequestFailureReason(publicReason) && action === 'fold') {
     return '因请求出错自动 fold'
   }
@@ -465,7 +534,7 @@ function formatReplayActionLabel(action?: string, amount?: number, publicReason?
   return `${action}${amount ? ` ${amount}` : ''}`
 }
 
-function buildReplaySeatBubble(step: ReplayStep | null): SeatBubble | null {
+function buildReplaySeatBubble(step: ReplayStep | null): ReplayBubble | null {
   if (!step || step.actorSeat === null) return null
 
   const payload = asRecord(step.event.payload)
@@ -479,7 +548,7 @@ function buildReplaySeatBubble(step: ReplayStep | null): SeatBubble | null {
   return {
     key: `${step.index}-${step.actorSeat}-${action ?? 'detail'}-${amount ?? 0}-${detail ?? ''}`,
     seat: step.actorSeat,
-    title: formatReplayActionLabel(action ?? undefined, amount, publicReason),
+    title: formatReplayActionLabel(action ?? undefined, amount, publicReason) ?? action ?? '动作',
     detail,
   }
 }
@@ -487,16 +556,6 @@ function buildReplaySeatBubble(step: ReplayStep | null): SeatBubble | null {
 function isRequestFailureReason(reason: string | null | undefined) {
   if (!reason) return false
   return reason.includes('请求失败') || reason.includes('请求出错') || reason.includes('响应异常')
-}
-
-function CardFace({ card }: { card: string }) {
-  const parts = cardParts(card)
-  return (
-    <span className={isRedCard(card) ? 'card-face red' : 'card-face'}>
-      <span className="card-rank">{parts.rank}</span>
-      <span className="card-suit">{parts.suit}</span>
-    </span>
-  )
 }
 
 function pretty(value: unknown) {

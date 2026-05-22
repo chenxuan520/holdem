@@ -19,6 +19,7 @@ export default function App() {
   const [presets, setPresets] = useState<Preset[]>([])
   const [selectedAI, setSelectedAI] = useState<string[]>([])
   const [aiPlayerNames, setAIPlayerNames] = useState<string[]>([])
+  const [customNameFlags, setCustomNameFlags] = useState<boolean[]>([])
   const [humanName, setHumanName] = useState('你')
   const [initialChips, setInitialChips] = useState(DEFAULT_CHIPS)
   const [smallBlind, setSmallBlind] = useState(DEFAULT_SMALL_BLIND)
@@ -47,8 +48,18 @@ export default function App() {
       .then((items) => {
         if (!alive) return
         setPresets(items)
-        setSelectedAI((current) => (current.length > 0 ? current : items[0] ? [items[0].id] : []))
-        setAIPlayerNames((current) => (current.length > 0 ? current : items[0] ? [items[0].name] : []))
+        setSelectedAI((current) => {
+          if (current.length > 0) return current
+          return items[0] ? [items[0].id] : []
+        })
+        setAIPlayerNames((current) => {
+          if (current.length > 0) return current
+          return items[0] ? [items[0].name] : []
+        })
+        setCustomNameFlags((current) => {
+          if (current.length > 0) return current
+          return items[0] ? [false] : []
+        })
       })
       .catch((err: Error) => alive && setError(err.message))
       .finally(() => alive && setLoading(false))
@@ -231,23 +242,43 @@ export default function App() {
     await openReplay(item.id)
   }
 
+  function applySeats(nextSelectedAI: string[], nextNames: string[], nextFlags: boolean[]) {
+    const reconciled = reconcileAINames(nextSelectedAI, nextNames, nextFlags, presets)
+    setSelectedAI(nextSelectedAI)
+    setAIPlayerNames(reconciled.names)
+    setCustomNameFlags(reconciled.flags)
+  }
+
   function handleAddSeat() {
     const nextPreset = pickNextDefaultPreset(presets, selectedAI)
     if (!nextPreset) return
     if (selectedAI.length >= (spectatorMode ? 6 : 5)) return
-    setSelectedAI((current) => [...current, nextPreset.id])
-    setAIPlayerNames((current) => [...current, nextDefaultAIName(nextPreset.name, current)])
+    const nextSelectedAI = [...selectedAI, nextPreset.id]
+    const nextNames = [...aiPlayerNames, '']
+    const nextFlags = [...customNameFlags, false]
+    applySeats(nextSelectedAI, nextNames, nextFlags)
   }
 
   function handleRemoveSeat(index: number) {
     const minCount = spectatorMode ? 2 : 1
-    setSelectedAI((current) => {
-      if (current.length <= minCount) return current
-      return current.filter((_, idx) => idx !== index)
-    })
-    setAIPlayerNames((current) => {
-      if (current.length <= minCount) return current
-      return current.filter((_, idx) => idx !== index)
+    if (selectedAI.length <= minCount) return
+    const nextSelectedAI = selectedAI.filter((_, idx) => idx !== index)
+    const nextNames = aiPlayerNames.filter((_, idx) => idx !== index)
+    const nextFlags = customNameFlags.filter((_, idx) => idx !== index)
+    applySeats(nextSelectedAI, nextNames, nextFlags)
+  }
+
+  function handleUpdatePreset(index: number, value: string) {
+    const nextSelectedAI = selectedAI.map((item, idx) => (idx === index ? value : item))
+    applySeats(nextSelectedAI, aiPlayerNames, customNameFlags)
+  }
+
+  function handleUpdateAIName(index: number, value: string) {
+    setAIPlayerNames((current) => current.map((name, idx) => (idx === index ? value : name)))
+    setCustomNameFlags((current) => {
+      const next = current.length === selectedAI.length ? [...current] : Array(selectedAI.length).fill(false)
+      next[index] = true
+      return next
     })
   }
 
@@ -311,29 +342,30 @@ export default function App() {
               if (!value) {
                 setSpectatorRunMode('semi')
               }
-              const nextSelectedAI = [...selectedAI]
-              const nextAIPlayerNames = [...aiPlayerNames]
+              let nextSelectedAI = [...selectedAI]
+              let nextNames = [...aiPlayerNames]
+              let nextFlags = [...customNameFlags]
               if (value) {
                 while (nextSelectedAI.length < 2) {
                   const nextPreset = pickNextDefaultPreset(presets, nextSelectedAI)
                   if (!nextPreset) break
                   nextSelectedAI.push(nextPreset.id)
-                  nextAIPlayerNames.push(nextDefaultAIName(nextPreset.name, nextAIPlayerNames))
+                  nextNames.push('')
+                  nextFlags.push(false)
                 }
-                setSelectedAI(nextSelectedAI.slice(0, 6))
-                setAIPlayerNames(nextAIPlayerNames.slice(0, 6))
-                return
+                nextSelectedAI = nextSelectedAI.slice(0, 6)
+                nextNames = nextNames.slice(0, 6)
+                nextFlags = nextFlags.slice(0, 6)
+              } else {
+                nextSelectedAI = nextSelectedAI.slice(0, 5)
+                nextNames = nextNames.slice(0, 5)
+                nextFlags = nextFlags.slice(0, 5)
               }
-              setSelectedAI(nextSelectedAI.slice(0, 5))
-              setAIPlayerNames(nextAIPlayerNames.slice(0, 5))
+              applySeats(nextSelectedAI, nextNames, nextFlags)
             }}
             onAddSeat={handleAddSeat}
-            onUpdatePreset={(index, value) =>
-              setSelectedAI((current) => current.map((item, idx) => (idx === index ? value : item)))
-            }
-            onUpdateAIName={(index, value) =>
-              setAIPlayerNames((current) => current.map((item, idx) => (idx === index ? value : item)))
-            }
+            onUpdatePreset={handleUpdatePreset}
+            onUpdateAIName={handleUpdateAIName}
             onRemoveSeat={handleRemoveSeat}
             onCreate={handleCreateMatch}
           />
@@ -360,14 +392,50 @@ export default function App() {
   )
 }
 
-function nextDefaultAIName(baseName: string, currentNames: string[]) {
-  const trimmed = baseName.trim() || 'AI'
-  if (!currentNames.includes(trimmed)) return trimmed
-  let index = 2
-  while (currentNames.includes(`${trimmed} ${index}`)) {
-    index += 1
+// computeDefaultAINames produces the canonical default display names for each
+// AI seat in `selectedAI`, given the preset catalog. Rule: a preset that shows
+// up exactly once at the table uses its preset name as-is; a preset that shows
+// up more than once gets every occurrence suffixed with `#1 / #2 / ...` so all
+// duplicates are unambiguous (we don't accept the asymmetric "Foo + Foo 2").
+function computeDefaultAINames(selectedAI: string[], presets: Preset[]): string[] {
+  const counts = new Map<string, number>()
+  for (const id of selectedAI) {
+    counts.set(id, (counts.get(id) ?? 0) + 1)
   }
-  return `${trimmed} ${index}`
+  const ordinals = new Map<string, number>()
+  return selectedAI.map((id) => {
+    const preset = presets.find((item) => item.id === id)
+    const baseName = preset?.name ?? 'AI'
+    const ordinal = (ordinals.get(id) ?? 0) + 1
+    ordinals.set(id, ordinal)
+    const total = counts.get(id) ?? 0
+    if (total <= 1) return baseName
+    return `${baseName} #${ordinal}`
+  })
+}
+
+// reconcileAINames keeps user-edited names while regenerating defaults for any
+// seat the user never touched. `prevFlags` records, per seat, whether the user
+// has manually edited that seat's name in the past; positions that haven't
+// been touched are rewritten to the new canonical default whenever the seat
+// list changes.
+function reconcileAINames(
+  selectedAI: string[],
+  prevNames: string[],
+  prevFlags: boolean[],
+  presets: Preset[],
+): { names: string[]; flags: boolean[] } {
+  const defaults = computeDefaultAINames(selectedAI, presets)
+  const names = selectedAI.map((_, index) => {
+    const wasCustomized = index < prevFlags.length && prevFlags[index]
+    const previous = prevNames[index]
+    if (wasCustomized && previous && previous.trim() !== '') {
+      return previous
+    }
+    return defaults[index] ?? ''
+  })
+  const flags = selectedAI.map((_, index) => prevFlags[index] ?? false)
+  return { names, flags }
 }
 
 function pickNextDefaultPreset(presets: Preset[], currentPresetIDs: string[]) {

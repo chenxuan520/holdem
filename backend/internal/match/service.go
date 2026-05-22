@@ -700,28 +700,33 @@ func (s *Service) buildPlayers(req CreateRequest) ([]Player, error) {
 	for index, presetID := range req.AIPresetIDs {
 		preset := s.presets[presetID]
 		ordinals[presetID]++
-		name := aiDisplayName(req.AIPlayerNames, index)
-		if strings.TrimSpace(name) == "" {
-			name = preset.Name
-			if totals[presetID] > 1 {
-				name = fmt.Sprintf("%s #%d", preset.Name, ordinals[presetID])
-			}
-		}
-		if totals[presetID] > 1 {
-			if strings.TrimSpace(aiDisplayName(req.AIPlayerNames, index)) == "" {
-				name = fmt.Sprintf("%s #%d", preset.Name, ordinals[presetID])
-			}
+		name := strings.TrimSpace(aiDisplayName(req.AIPlayerNames, index))
+		if name == "" {
+			name = defaultAIPlayerName(preset.Name, ordinals[presetID], totals[presetID])
 		}
 
 		players = append(players, Player{
 			Seat:     index + seatOffset,
-			Name:     strings.TrimSpace(name),
+			Name:     name,
 			Chips:    req.InitialChips,
 			PresetID: preset.ID,
 		})
 	}
 
 	return players, nil
+}
+
+// defaultAIPlayerName produces the fallback display name for an AI seat when
+// the request did not specify one. Rule: if the same preset shows up exactly
+// once at the table, use the preset name as-is. If the same preset shows up
+// multiple times, suffix every occurrence with `#1 / #2 / ...` so duplicates
+// are never ambiguous and the first one is also clearly numbered (instead of
+// "Foo" + "Foo 2", which makes the first one look like it lost its index).
+func defaultAIPlayerName(presetName string, ordinal int, total int) string {
+	if total <= 1 {
+		return presetName
+	}
+	return fmt.Sprintf("%s #%d", presetName, ordinal)
 }
 
 func newID() (string, error) {

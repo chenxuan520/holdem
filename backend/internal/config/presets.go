@@ -12,21 +12,33 @@ type PresetFile struct {
 	Presets []Preset `yaml:"presets"`
 }
 
+// Structured-output modes the preset can request from the OpenAI-compatible
+// provider. The Preset.StructuredOutput field is normalized into one of these
+// canonical values during LoadPresets, and the AI client switches behaviour
+// based on that single field instead of guessing from the endpoint URL.
+const (
+	StructuredOutputToolCall   = "tool_call"
+	StructuredOutputJSONObject = "json_object"
+	StructuredOutputNone       = "none"
+)
+
 type Preset struct {
-	ID           string `yaml:"id" json:"id"`
-	Name         string `yaml:"name" json:"name"`
-	Endpoint     string `yaml:"endpoint" json:"endpoint"`
-	Token        string `yaml:"token" json:"-"`
-	Model        string `yaml:"model" json:"model"`
-	SystemPrompt string `yaml:"system_prompt" json:"systemPrompt"`
+	ID               string `yaml:"id" json:"id"`
+	Name             string `yaml:"name" json:"name"`
+	Endpoint         string `yaml:"endpoint" json:"endpoint"`
+	Token            string `yaml:"token" json:"-"`
+	Model            string `yaml:"model" json:"model"`
+	SystemPrompt     string `yaml:"system_prompt" json:"systemPrompt"`
+	StructuredOutput string `yaml:"structured_output,omitempty" json:"structuredOutput,omitempty"`
 }
 
 type PublicPreset struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Endpoint     string `json:"endpoint"`
-	Model        string `json:"model"`
-	SystemPrompt string `json:"systemPrompt"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Endpoint         string `json:"endpoint"`
+	Model            string `json:"model"`
+	SystemPrompt     string `json:"systemPrompt"`
+	StructuredOutput string `json:"structuredOutput"`
 }
 
 func LoadPresets(path string) ([]Preset, error) {
@@ -50,6 +62,11 @@ func LoadPresets(path string) ([]Preset, error) {
 		if strings.TrimSpace(preset.ID) == "" {
 			preset.ID = defaultPresetID(preset.Name, i+1)
 		}
+		normalized, err := normalizeStructuredOutput(preset.StructuredOutput)
+		if err != nil {
+			return nil, fmt.Errorf("preset %d: %w", i+1, err)
+		}
+		preset.StructuredOutput = normalized
 		if err := preset.validate(); err != nil {
 			return nil, fmt.Errorf("preset %d: %w", i+1, err)
 		}
@@ -65,11 +82,40 @@ func LoadPresets(path string) ([]Preset, error) {
 
 func (p Preset) Public() PublicPreset {
 	return PublicPreset{
-		ID:           p.ID,
-		Name:         p.Name,
-		Endpoint:     p.Endpoint,
-		Model:        p.Model,
-		SystemPrompt: p.SystemPrompt,
+		ID:               p.ID,
+		Name:             p.Name,
+		Endpoint:         p.Endpoint,
+		Model:            p.Model,
+		SystemPrompt:     p.SystemPrompt,
+		StructuredOutput: p.StructuredOutputMode(),
+	}
+}
+
+// StructuredOutputMode returns the canonical structured-output mode for this
+// preset. An empty value (legacy yaml without the field) falls back to
+// tool_call, which is the OpenAI-compatible default.
+func (p Preset) StructuredOutputMode() string {
+	if p.StructuredOutput == "" {
+		return StructuredOutputToolCall
+	}
+	return p.StructuredOutput
+}
+
+// normalizeStructuredOutput maps user-facing aliases to canonical values, so
+// the rest of the code only ever sees tool_call / json_object / none. An empty
+// input is treated as the default (tool_call).
+func normalizeStructuredOutput(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return StructuredOutputToolCall, nil
+	case "tool_call", "tool_calls", "tools", "tool":
+		return StructuredOutputToolCall, nil
+	case "json_object", "json", "jsonobject":
+		return StructuredOutputJSONObject, nil
+	case "none", "off", "disabled", "false":
+		return StructuredOutputNone, nil
+	default:
+		return "", fmt.Errorf("invalid structured_output %q (expected tool_call | json_object | none)", value)
 	}
 }
 

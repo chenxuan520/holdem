@@ -1,9 +1,28 @@
+# Demo preset file. Copy this to `config/ai-presets.yaml` and fill in real
+# endpoint / token / model values:
+#
+#   cp config/ai-presets.demo.yaml config/ai-presets.yaml
+#
+# Each preset describes one OpenAI-compatible model that can sit at the table.
+# The system_prompt is intentionally kept identical across A/B/C so that
+# differences in play come from the model itself, not from extra prompting.
+#
+# structured_output controls how the backend asks the provider to return a
+# decision. Allowed values:
+#   - tool_call   (default) request a `submit_action` tool call. Use this when
+#                 the provider supports OpenAI tool/function calling.
+#   - json_object request `response_format={"type":"json_object"}` only.
+#   - none        send no structured-output hints; rely purely on the prompt
+#                 and the parser fallback to extract `{ ... }` from content.
+#
+# When the field is omitted the backend uses tool_call.
 presets:
   - id: tight-shark
-    name: DeepSeek Benchmark A
-    endpoint: https://api.deepseek.com
+    name: Benchmark A
+    endpoint: https://api.openai.com/v1
     token: replace-with-your-token
-    model: deepseek-v4-flash
+    model: gpt-4o-mini
+    structured_output: tool_call
     system_prompt: |
       你正在参加德州扑克 AI 决策基准测试。
       目标是在标准无限注德州扑克局面中，基于当前可见信息做尽可能高 EV 的理性决策。
@@ -12,10 +31,11 @@ presets:
       你必须只输出合法结构化动作 JSON。
 
   - id: loose-caller
-    name: DeepSeek Benchmark B
+    name: Benchmark B
     endpoint: https://api.deepseek.com
     token: replace-with-your-token
-    model: deepseek-v4-flash
+    model: deepseek-chat
+    structured_output: tool_call
     system_prompt: |
       你正在参加德州扑克 AI 决策基准测试。
       目标是在标准无限注德州扑克局面中，基于当前可见信息做尽可能高 EV 的理性决策。
@@ -24,10 +44,12 @@ presets:
       你必须只输出合法结构化动作 JSON。
 
   - id: balanced-pro
-    name: DeepSeek Benchmark C
-    endpoint: https://api.deepseek.com
+    name: Benchmark C
+    endpoint: https://api.example.com/v1
     token: replace-with-your-token
-    model: deepseek-v4-flash
+    model: some-other-model
+    # structured_output omitted -> defaults to tool_call. If your provider does
+    # not support tools yet, switch this preset to `json_object` or `none`.
     system_prompt: |
       你正在参加德州扑克 AI 决策基准测试。
       目标是在标准无限注德州扑克局面中，基于当前可见信息做尽可能高 EV 的理性决策。

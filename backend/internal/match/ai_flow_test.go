@@ -41,19 +41,8 @@ func TestBuildPromptInputSkipsEliminatedPlayers(t *testing.T) {
 	}
 
 	seenSeats := map[int]bool{}
-	for _, item := range input.Players {
-		player, ok := item.(map[string]any)
-		if !ok {
-			t.Fatalf("expected player payload to be map[string]any, got %T", item)
-		}
-		seatValue, ok := player["seat"].(int)
-		if !ok {
-			t.Fatalf("expected seat to be int, got %T", player["seat"])
-		}
-		if _, exists := player["eliminated"]; exists {
-			t.Fatalf("did not expect eliminated field in active player payload: %+v", player)
-		}
-		seenSeats[seatValue] = true
+	for _, player := range input.Players {
+		seenSeats[player.Seat] = true
 	}
 
 	if seenSeats[1] {
@@ -188,6 +177,99 @@ func TestCompactActionLogTrimsToLimit(t *testing.T) {
 	}
 	if got[2] != "pre:4.f" {
 		t.Fatalf("expected newest kept entry to be fold, got %q", got[2])
+	}
+}
+
+func TestCompactActionLogZeroLimitMeansUnlimited(t *testing.T) {
+	hand := &handState{ActionLog: []ActionLog{
+		{Seat: 0, Action: "post_small_blind", Amount: 1, Street: "preflop"},
+		{Seat: 1, Action: "post_big_blind", Amount: 2, Street: "preflop"},
+		{Seat: 2, Action: "raise", Amount: 6, Street: "preflop"},
+		{Seat: 3, Action: "call", Amount: 6, Street: "preflop"},
+		{Seat: 0, Action: "fold", Street: "preflop"},
+		{Seat: 1, Action: "call", Amount: 4, Street: "preflop"},
+		{Seat: 1, Action: "check", Street: "flop"},
+		{Seat: 2, Action: "raise", Amount: 12, Street: "flop"},
+		{Seat: 3, Action: "call", Amount: 12, Street: "flop"},
+		{Seat: 1, Action: "fold", Street: "flop"},
+		{Seat: 2, Action: "raise", Amount: 30, Street: "turn"},
+		{Seat: 3, Action: "call", Amount: 30, Street: "turn"},
+	}}
+	got := compactActionLog(hand, 0)
+	if len(got) != 12 {
+		t.Fatalf("expected unlimited log to return all 12 entries, got %d (%v)", len(got), got)
+	}
+	if got[0] != "pre:0.sb1" {
+		t.Fatalf("expected first entry to be preserved (no truncation), got %q", got[0])
+	}
+	if got[len(got)-1] != "turn:3.c30" {
+		t.Fatalf("expected last entry to be the final turn call, got %q", got[len(got)-1])
+	}
+}
+
+func TestBuildPromptInputIncludesYourCommitAndPlayerCommits(t *testing.T) {
+	service := &Service{}
+	snapshot := Snapshot{
+		SmallBlind: 1,
+		BigBlind:   2,
+		Players: []Player{
+			{Seat: 0, Name: "Hero", Chips: 50, IsHuman: true},
+			{Seat: 1, Name: "AI", Chips: 70, PresetID: "ai-1"},
+		},
+	}
+	// Hero already 3-bet preflop and called the flop bet — by the river
+	// they need to know they're 50 chips deep already without scanning
+	// every line of the action log.
+	hidden := &hiddenState{hand: &handState{
+		Number:             1,
+		Stage:              "river",
+		DealerSeat:         0,
+		SmallBlindSeat:     0,
+		BigBlindSeat:       1,
+		Board:              []string{"As", "Kd", "7c", "5d", "3h"},
+		HoleCards:          map[int][]string{0: {"Kc", "Kh"}},
+		Folded:             map[int]bool{},
+		AllIn:              map[int]bool{},
+		StreetContribution: map[int]int{0: 0, 1: 0},
+		TotalContribution:  map[int]int{0: 50, 1: 30},
+		CurrentBet:         0,
+		MinRaiseSize:       2,
+		Pot:                80,
+		ActionLog: []ActionLog{
+			{Seat: 0, Action: "post_small_blind", Amount: 1, Street: "preflop"},
+			{Seat: 1, Action: "post_big_blind", Amount: 2, Street: "preflop"},
+			{Seat: 0, Action: "raise", Amount: 9, Street: "preflop"},
+			{Seat: 1, Action: "call", Amount: 7, Street: "preflop"},
+			{Seat: 1, Action: "check", Street: "flop"},
+			{Seat: 0, Action: "raise", Amount: 16, Street: "flop"},
+			{Seat: 1, Action: "call", Amount: 16, Street: "flop"},
+			{Seat: 1, Action: "check", Street: "turn"},
+			{Seat: 0, Action: "raise", Amount: 25, Street: "turn"},
+			{Seat: 1, Action: "call", Amount: 5, Street: "turn"},
+			{Seat: 1, Action: "check", Street: "river"},
+		},
+	}}
+
+	input := service.buildPromptInput(snapshot, hidden, 0)
+
+	if input.YourCommit != 50 {
+		t.Fatalf("expected yourCommit=50 (matches TotalContribution[0]), got %d", input.YourCommit)
+	}
+	if len(input.Log) != 11 {
+		t.Fatalf("expected full 11-entry hand log (no 8-cap), got %d entries: %v", len(input.Log), input.Log)
+	}
+	if input.Log[0] != "pre:0.sb1" {
+		t.Fatalf("expected hand log to retain preflop opener, got %q", input.Log[0])
+	}
+
+	// players[].commit should mirror TotalContribution; only non-zero
+	// entries get included, so seat 0 (50) + seat 1 (30) both carry it.
+	commits := map[int]int{}
+	for _, entry := range input.Players {
+		commits[entry.Seat] = entry.Commit
+	}
+	if commits[0] != 50 || commits[1] != 30 {
+		t.Fatalf("expected players[].commit to expose total chips this hand: got %+v", commits)
 	}
 }
 
@@ -363,4 +445,110 @@ func TestBuildPromptInputJSONIsCompact(t *testing.T) {
 			t.Fatalf("expected compact input to include %s, got: %s", expected, body)
 		}
 	}
+	// yourCommit/commit are omitempty: SB seat (1 chip total) does not show
+	// yourCommit because seat 1's commit is 2; this test runs from seat 1's
+	// perspective (yourCommit=2) so both yourCommit and players.commit must
+	// appear once a contribution exists.
+	for _, expected := range []string{"\"yourCommit\"", "\"commit\""} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected compact input to include %s once any player has put chips in: %s", expected, body)
+		}
+	}
+}
+
+// TestPromptInputJSONFieldOrderMaximisesCachePrefix locks in the cache
+// friendly declaration order: match-stable (sb/bb) → hand-stable
+// (hand/stage/board) → per-action volatile (pot/seat/...). Any reorder
+// that breaks this would silently regress prompt-cache hit rate on
+// providers like GLM/Kimi (256-token min) without anything else
+// noticing.
+func TestPromptInputJSONFieldOrderMaximisesCachePrefix(t *testing.T) {
+	service := &Service{}
+	snapshot := Snapshot{
+		ID:         "match-cache-order",
+		SmallBlind: 1,
+		BigBlind:   2,
+		Players: []Player{
+			{Seat: 0, Name: "Hero", Chips: 90, IsHuman: true},
+			{Seat: 1, Name: "AI", Chips: 110, PresetID: "ai-1"},
+		},
+	}
+	hidden := &hiddenState{hand: &handState{
+		Number:             5,
+		Stage:              "flop",
+		DealerSeat:         0,
+		SmallBlindSeat:     0,
+		BigBlindSeat:       1,
+		Board:              []string{"As", "Kd", "7c"},
+		HoleCards:          map[int][]string{1: {"Ah", "Ac"}},
+		Folded:             map[int]bool{},
+		AllIn:              map[int]bool{},
+		StreetContribution: map[int]int{0: 0, 1: 0},
+		TotalContribution:  map[int]int{0: 5, 1: 6},
+		CurrentBet:         0,
+		MinRaiseSize:       2,
+		Pot:                11,
+		ActionLog: []ActionLog{
+			{Seat: 1, Action: "raise", Amount: 6, Street: "preflop"},
+		},
+	}}
+
+	input := service.buildPromptInput(snapshot, hidden, 1)
+	body := string(mustMarshal(t, input))
+
+	if !strings.HasPrefix(body, `{"sb":`) {
+		t.Fatalf("expected JSON to start with stable match-level field sb, got prefix %q", safePrefix(body, 80))
+	}
+
+	// Check ordering of unique top-level field names (each appears only
+	// once at the top level; "seat" is intentionally excluded because it
+	// also appears inside players[]).
+	indices := map[string]int{}
+	for _, key := range []string{`"sb":`, `"bb":`, `"hand":`, `"stage":`, `"board":`, `"lastAgg":`, `"pot":`, `"yourChips":`} {
+		idx := strings.Index(body, key)
+		if idx < 0 {
+			t.Fatalf("expected field %s to appear in JSON: %s", key, body)
+		}
+		indices[key] = idx
+	}
+	expectedOrder := []string{`"sb":`, `"bb":`, `"hand":`, `"stage":`, `"board":`, `"lastAgg":`, `"pot":`, `"yourChips":`}
+	for i := 1; i < len(expectedOrder); i++ {
+		if indices[expectedOrder[i-1]] >= indices[expectedOrder[i]] {
+			t.Fatalf("expected %s to appear before %s for cache prefix stability; got %d vs %d in %s",
+				expectedOrder[i-1], expectedOrder[i], indices[expectedOrder[i-1]], indices[expectedOrder[i]], body)
+		}
+	}
+
+	// Inside players[], name/seat/position should land before chips so a
+	// chip swing on one player doesn't immediately brick the prefix at
+	// byte 0 of every player entry.
+	playersIdx := strings.Index(body, `"players":`)
+	if playersIdx < 0 {
+		t.Fatalf("expected players field in JSON: %s", body)
+	}
+	tail := body[playersIdx:]
+	nameIdx := strings.Index(tail, `"name":`)
+	chipsIdx := strings.Index(tail, `"chips":`)
+	if nameIdx < 0 || chipsIdx < 0 {
+		t.Fatalf("expected name and chips inside players[]: %s", tail[:200])
+	}
+	if nameIdx >= chipsIdx {
+		t.Fatalf("expected players[].name to appear before players[].chips for cache stability; got name=%d chips=%d", nameIdx, chipsIdx)
+	}
+}
+
+func mustMarshal(t *testing.T, value any) []byte {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return data
+}
+
+func safePrefix(s string, n int) string {
+	if len(s) < n {
+		return s
+	}
+	return s[:n]
 }

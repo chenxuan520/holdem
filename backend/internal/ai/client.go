@@ -48,38 +48,73 @@ type ProbeResult struct {
 	Error           string `json:"error,omitempty"`
 }
 
-// PromptInput is the structured user content sent to the model. Field names are
-// intentionally short and only include data the model actually needs to make a
-// decision; pre-computed numerical hints (position, effBB, potOdds, ...) are
-// folded in so the model spends fewer tokens deriving them.
+// PromptInput is the structured user content sent to the model. Field names
+// are intentionally short and only include data the model actually needs to
+// make a decision; pre-computed numerical hints (position, effBB, potOdds,
+// ...) are folded in so the model spends fewer tokens deriving them.
+//
+// Field order is also tuned for prompt-cache hit-rate. Most providers
+// (DeepSeek, Zhipu GLM, Moonshot Kimi, Anthropic, OpenAI) cache by exact
+// byte-prefix, so we declare fields from most- to least-stable: match-level
+// constants (sb, bb) → hand-stable (hand, stage, board, lastAgg) →
+// per-action volatile (pot, seat, hole, yourChips, ...) → growing log.
+// Within the same match, two consecutive AI calls share the leading
+// `{"sb":...,"bb":...,"hand":...` bytes, which is enough for low-min
+// providers (GLM/Kimi at 256-token min, DeepSeek at 64) to extend the
+// cache past the system prompt; high-min providers (OpenAI at 1024) still
+// don't hit on user content but the ordering doesn't hurt them either.
 type PromptInput struct {
-	Hand  int    `json:"hand"`
-	Stage string `json:"stage"`
+	// Match-level constants — stable for the entire match.
+	SB int `json:"sb"`
+	BB int `json:"bb"`
 
-	// Self
-	Seat          int      `json:"seat"`
-	Position      string   `json:"position,omitempty"`
-	Hole          []string `json:"hole"`
-	YourChips     int      `json:"yourChips"`
-	YourStreetBet int      `json:"yourStreetBet,omitempty"`
+	// Hand-level — stable within the current hand.
+	Hand int `json:"hand"`
 
-	// Table
+	// Street-level — stable within the current betting round.
+	Stage string   `json:"stage"`
 	Board []string `json:"board"`
-	Pot   int      `json:"pot"`
-	SB    int      `json:"sb"`
-	BB    int      `json:"bb"`
-	EffBB float64  `json:"effBB"`
 
-	// Action context
-	ToCall       int     `json:"toCall,omitempty"`
-	MinRaiseTo   int     `json:"minRaiseTo,omitempty"`
-	PotOdds      float64 `json:"potOdds,omitempty"`
-	LegalActions []any   `json:"actions"`
+	// Hand-dynamic — only changes when someone makes a new aggressive
+	// action (raise / all-in). Stable across passive calls / checks.
+	LastAggressor *int `json:"lastAgg,omitempty"`
 
-	// Other players + recent action log (compact strings).
-	Players       []any    `json:"players"`
-	LastAggressor *int     `json:"lastAgg,omitempty"`
-	Log           []string `json:"log,omitempty"`
+	// Per-action volatile — anything below here typically differs between
+	// any two consecutive AI calls. Keep them late so the stable prefix
+	// above stays cached.
+	Pot           int            `json:"pot"`
+	Seat          int            `json:"seat"`
+	Position      string         `json:"position,omitempty"`
+	Hole          []string       `json:"hole"`
+	YourChips     int            `json:"yourChips"`
+	YourStreetBet int            `json:"yourStreetBet,omitempty"`
+	YourCommit    int            `json:"yourCommit,omitempty"`
+	EffBB         float64        `json:"effBB"`
+	ToCall        int            `json:"toCall,omitempty"`
+	MinRaiseTo    int            `json:"minRaiseTo,omitempty"`
+	PotOdds       float64        `json:"potOdds,omitempty"`
+	LegalActions  []any          `json:"actions"`
+	Players       []PromptPlayer `json:"players"`
+	Log           []string       `json:"log,omitempty"` // append-only, kept last.
+}
+
+// PromptPlayer mirrors one entry of the players list in the per-decision
+// payload. We keep this as an explicit struct (instead of a map) so that
+// JSON output uses *declaration order* rather than alphabetical key order.
+// `name` / `seat` / `position` are stable within a hand and serialise first;
+// the volatile chip-related fields land at the end so changes in chips don't
+// break the cacheable prefix at byte 0 of every entry.
+type PromptPlayer struct {
+	Name      string `json:"name"`
+	Seat      int    `json:"seat"`
+	Position  string `json:"position,omitempty"`
+	Chips     int    `json:"chips"`
+	StreetBet int    `json:"streetBet,omitempty"`
+	Commit    int    `json:"commit,omitempty"`
+	Folded    bool   `json:"folded,omitempty"`
+	AllIn     bool   `json:"allIn,omitempty"`
+	Self      bool   `json:"self,omitempty"`
+	Human     bool   `json:"human,omitempty"`
 }
 
 func NewClient() *Client {

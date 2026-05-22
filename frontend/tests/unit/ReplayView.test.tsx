@@ -196,14 +196,13 @@ describe('ReplayView', () => {
     expect(screen.getAllByText('新一手开始').length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button').some((button) => button.textContent?.includes('AI A 私有思考'))).toBe(false)
     await user.click(screen.getByRole('button', { name: '下一步' }))
-    expect(screen.getAllByText('AI A 思考完成').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('AI A 执行动作').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('raise 20').length).toBeGreaterThan(0)
     expect(screen.getAllByText('这里是模型思考').length).toBeGreaterThan(0)
     expect(screen.getByText('请求次数：2')).toBeInTheDocument()
     expect(within(screen.getByTestId('replay-seat-bubble')).getByText('raise 20')).toBeInTheDocument()
     expect(within(screen.getByTestId('replay-seat-bubble')).getByText('这里是模型思考')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '下一步' }))
-    expect(screen.getAllByText('AI A 执行动作').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('raise 20').length).toBeGreaterThan(0)
+    expect(screen.queryByText('AI A 思考完成')).toBeNull()
   })
 
   it('keeps 8 hands usable in a horizontal tab strip', async () => {
@@ -331,9 +330,8 @@ describe('ReplayView', () => {
     )
 
     await user.click(screen.getByRole('button', { name: '下一步' }))
-    expect(screen.getAllByText('AI A 请求出错').length).toBeGreaterThan(0)
-    await user.click(screen.getByRole('button', { name: '下一步' }))
     expect(screen.getAllByText('因请求出错，系统自动执行 fold。').length).toBeGreaterThan(0)
     expect(screen.getByText('最近：因请求出错自动 fold')).toBeInTheDocument()
+    expect(screen.queryByText('AI A 请求出错')).toBeNull()
   })
 })

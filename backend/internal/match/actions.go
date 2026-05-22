@@ -124,10 +124,32 @@ func shouldPauseAfterHand(snapshot Snapshot) bool {
 	if snapshot.Status != "hand_complete" {
 		return false
 	}
-	if hasHuman(snapshot.Players) {
+	// Use tableHasHumanSeat (which counts eliminated humans) instead of
+	// hasHuman/humanSeat (which skip them). Without this, the moment the
+	// hero busts out, finalizeHand flips Eliminated=true, hasHuman returns
+	// false, runUntilPause blows straight past the hand_complete snapshot
+	// into the next hand or match_finished, and the user never sees the
+	// hand they were eliminated on. Once eliminated, the table behaves
+	// like a semi-auto spectator: pause every hand, the user clicks
+	// 继续下一手 to advance through the runout.
+	if tableHasHumanSeat(snapshot.Players) {
 		return true
 	}
 	return snapshot.Control.SemiAutoMode || snapshot.Control.ManualMode || snapshot.Control.Paused
+}
+
+// tableHasHumanSeat reports whether the *match was set up* with a human
+// player, regardless of whether they currently have chips. Use this for
+// "should the UX behave like human-vs-AI?" checks (pause cadence, hero
+// footer visibility on the backend side). For "is there a live human
+// whose turn it could be right now?", use humanSeat / hasHuman instead.
+func tableHasHumanSeat(players []Player) bool {
+	for _, player := range players {
+		if player.IsHuman {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) clearStepPermission(id string) {

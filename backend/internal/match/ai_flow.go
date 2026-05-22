@@ -53,7 +53,16 @@ func (s *Service) buildPromptInput(snapshot Snapshot, hidden *hiddenState, seat 
 	legalActions := compactLegalActions(legalActionsForSeat(snapshot.Players, hand, seat))
 	players := compactPlayersPayload(snapshot.Players, hand, seat, dealerSeat)
 	lastAggressor := lastAggressorSeat(hand)
-	logEntries := compactActionLog(hand, 8)
+	// Send the full per-hand action log (limit=0). Capping to the last 8
+	// entries used to drop the AI's own preflop action by the time it had
+	// to decide on the river — it could no longer tell whether it was the
+	// 3-bettor or just a cold-caller.
+	logEntries := compactActionLog(hand, 0)
+
+	yourCommit := 0
+	if hand != nil {
+		yourCommit = hand.TotalContribution[seat]
+	}
 
 	hole := []string{}
 	if hand != nil {
@@ -84,6 +93,7 @@ func (s *Service) buildPromptInput(snapshot Snapshot, hidden *hiddenState, seat 
 		Hole:          hole,
 		YourChips:     you.Chips,
 		YourStreetBet: yourStreetBet,
+		YourCommit:    yourCommit,
 		Board:         board,
 		Pot:           pot,
 		SB:            snapshot.SmallBlind,
@@ -229,37 +239,52 @@ func liveSeats(players []Player) []int {
 // compactPlayersPayload returns one entry per still-relevant seat (we omit
 // eliminated players entirely; they aren't useful context). Each entry only
 // includes fields that vary, so default-zero / default-false fields are left
-// out to save tokens.
-func compactPlayersPayload(players []Player, hand *handState, mySeat int, dealerSeat int) []any {
-	out := make([]any, 0, len(players))
+// out via omitempty to save tokens.
+//
+// We use the explicit `backendai.PromptPlayer` struct rather than a map so
+// JSON output respects declaration order — name / seat / position serialise
+// first (stable within a hand), and only the chip-related volatile fields
+// trail. With map[string]any Go would alphabetise keys, which put `chips`
+// near the front of every entry and broke the cacheable prefix on every
+// betting action.
+func compactPlayersPayload(players []Player, hand *handState, mySeat int, dealerSeat int) []backendai.PromptPlayer {
+	out := make([]backendai.PromptPlayer, 0, len(players))
 	for _, player := range players {
 		if player.Eliminated {
 			continue
 		}
-		entry := map[string]any{
-			"seat":  player.Seat,
-			"name":  player.Name,
-			"chips": player.Chips,
+		entry := backendai.PromptPlayer{
+			Name:  player.Name,
+			Seat:  player.Seat,
+			Chips: player.Chips,
 		}
 		if pos := positionLabelForSeat(players, dealerSeat, player.Seat); pos != "" {
-			entry["position"] = pos
+			entry.Position = pos
 		}
 		if hand != nil {
 			if v := hand.StreetContribution[player.Seat]; v > 0 {
-				entry["streetBet"] = v
+				entry.StreetBet = v
+			}
+			// commit = total chips this player has put in this hand
+			// across all streets (blinds + calls + raises). Critical
+			// for pot-committed reasoning; without it the model had
+			// to scan the action log and add up amounts, which got
+			// even harder once we removed the 8-entry log cap.
+			if v := hand.TotalContribution[player.Seat]; v > 0 {
+				entry.Commit = v
 			}
 			if hand.Folded[player.Seat] {
-				entry["folded"] = true
+				entry.Folded = true
 			}
 			if hand.AllIn[player.Seat] {
-				entry["allIn"] = true
+				entry.AllIn = true
 			}
 		}
 		if player.Seat == mySeat {
-			entry["self"] = true
+			entry.Self = true
 		}
 		if player.IsHuman {
-			entry["human"] = true
+			entry.Human = true
 		}
 		out = append(out, entry)
 	}
@@ -280,10 +305,15 @@ func compactLegalActions(options []ActionOption) []any {
 	return out
 }
 
-// compactActionLog renders the most recent `limit` ActionLog entries into the
-// dense "stage:seat.code[amount]" string format described in the system
-// prompt. Saving roughly 200 tokens per request vs the previous full-struct
-// JSON.
+// compactActionLog renders ActionLog entries into the dense
+// "stage:seat.code[amount]" string format described in the system prompt
+// (saves ~200 tokens per request vs the previous full-struct JSON). Pass
+// `limit > 0` to keep only the most recent N entries; pass `limit <= 0`
+// to send the full hand log. The default call site uses 0 because losing
+// early actions ("did I 3-bet preflop?") materially hurts the model's
+// ability to reason about its own commitment by the river. ActionLog is
+// already per-hand, so even a runout-with-multiway-raise-war stays well
+// under ~40 entries (~120 tokens).
 func compactActionLog(hand *handState, limit int) []string {
 	if hand == nil {
 		return nil
@@ -293,7 +323,7 @@ func compactActionLog(hand *handState, limit int) []string {
 		return nil
 	}
 	start := 0
-	if len(entries) > limit {
+	if limit > 0 && len(entries) > limit {
 		start = len(entries) - limit
 	}
 	out := make([]string, 0, len(entries)-start)

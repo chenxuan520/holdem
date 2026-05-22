@@ -309,6 +309,44 @@ func TestRepeatedAIFailuresFallbackToFold(t *testing.T) {
 	}
 }
 
+func TestShouldPauseAfterHandStillTriggersForEliminatedHero(t *testing.T) {
+	// Simulates the moment right after the hero busts out: status is
+	// hand_complete, hero seat is still in the players list but flagged
+	// Eliminated, and live AIs still hold chips. Without the
+	// tableHasHumanSeat fallback, shouldPauseAfterHand returned false here
+	// because humanSeat skips eliminated humans, runUntilPause then blew
+	// past the hand_complete snapshot, and the user never saw the hand
+	// they were knocked out on.
+	snapshot := Snapshot{
+		Status: "hand_complete",
+		Players: []Player{
+			{Seat: 0, Name: "Hero", IsHuman: true, Eliminated: true, Chips: 0},
+			{Seat: 1, Name: "AI A", IsHuman: false, Chips: 200},
+			{Seat: 2, Name: "AI B", IsHuman: false, Chips: 200},
+		},
+	}
+	if !shouldPauseAfterHand(snapshot) {
+		t.Fatalf("expected pause after elimination hand even when hero is Eliminated; got false")
+	}
+
+	// Sanity: pure AI table with all humans gone (i.e. spectator-only setup
+	// from the start) still falls through to the control-flag branch.
+	allAI := Snapshot{
+		Status: "hand_complete",
+		Players: []Player{
+			{Seat: 0, Name: "AI A", IsHuman: false, Chips: 200},
+			{Seat: 1, Name: "AI B", IsHuman: false, Chips: 100},
+		},
+	}
+	if shouldPauseAfterHand(allAI) {
+		t.Fatalf("did not expect pause for full-auto pure-AI table without semi-auto/manual flags")
+	}
+	allAI.Control.SemiAutoMode = true
+	if !shouldPauseAfterHand(allAI) {
+		t.Fatalf("expected semi-auto pure-AI table to pause after hand_complete")
+	}
+}
+
 func TestListRecordsIncludesActiveMatch(t *testing.T) {
 	service := NewService([]config.Preset{
 		{ID: "ai-1", Name: "AI 1", Endpoint: "https://api.openai.com/v1", Token: "replace-with-your-token", Model: "gpt-4.1-mini", SystemPrompt: "test"},

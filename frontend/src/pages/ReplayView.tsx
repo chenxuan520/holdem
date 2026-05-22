@@ -415,7 +415,10 @@ function buildReplaySteps(hand: ReplayHand | null, replay: ReplayDetail | null):
       logIndexBySeat.set(actorSeat, logIndex + 1)
       decisionPayload = payload
       latestDecisionBySeat.set(actorSeat, { log: linkedLog, payload })
-    } else if (actorSeat !== null) {
+      continue
+    }
+
+    if (actorSeat !== null) {
       const latest = latestDecisionBySeat.get(actorSeat)
       linkedLog = latest?.log ?? null
       decisionPayload = latest?.payload ?? null

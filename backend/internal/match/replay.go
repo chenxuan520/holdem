@@ -82,7 +82,70 @@ type AILog struct {
 	ResponseBody   string    `json:"responseBody"`
 	Structured     any       `json:"structured"`
 	CreatedAt      time.Time `json:"createdAt"`
+	AttemptCount   int       `json:"attemptCount,omitempty"`
 	Error          string    `json:"error,omitempty"`
+}
+
+func normalizeReplayDetail(replay ReplayDetail) ReplayDetail {
+	replay.Players = clonePlayers(replay.Players)
+	replay.Hands = normalizeReplayHands(replay.Hands)
+	replay.AILogs = cloneAILogs(replay.AILogs)
+	return replay
+}
+
+func normalizeReplayHands(hands []ReplayHand) []ReplayHand {
+	if len(hands) == 0 {
+		return []ReplayHand{}
+	}
+	out := make([]ReplayHand, len(hands))
+	for index, hand := range hands {
+		hand.Board = cloneStrings(hand.Board)
+		hand.Winners = cloneReplayWinners(hand.Winners)
+		hand.Players = cloneReplayPlayerStates(hand.Players)
+		hand.Events = cloneReplayEvents(hand.Events)
+		out[index] = hand
+	}
+	return out
+}
+
+func clonePlayers(players []Player) []Player {
+	if len(players) == 0 {
+		return []Player{}
+	}
+	return append([]Player{}, players...)
+}
+
+func cloneAILogs(logs []AILog) []AILog {
+	if len(logs) == 0 {
+		return []AILog{}
+	}
+	return append([]AILog{}, logs...)
+}
+
+func cloneReplayWinners(winners []ReplayWinner) []ReplayWinner {
+	if len(winners) == 0 {
+		return []ReplayWinner{}
+	}
+	return append([]ReplayWinner{}, winners...)
+}
+
+func cloneReplayEvents(events []ReplayEvent) []ReplayEvent {
+	if len(events) == 0 {
+		return []ReplayEvent{}
+	}
+	return append([]ReplayEvent{}, events...)
+}
+
+func cloneReplayPlayerStates(players []ReplayPlayerState) []ReplayPlayerState {
+	if len(players) == 0 {
+		return []ReplayPlayerState{}
+	}
+	out := make([]ReplayPlayerState, len(players))
+	for index, player := range players {
+		player.HoleCards = cloneStrings(player.HoleCards)
+		out[index] = player
+	}
+	return out
 }
 
 type hiddenState struct {

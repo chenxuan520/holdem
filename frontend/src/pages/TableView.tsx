@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { cardParts, isRedCard } from '../lib/cards'
+import { seatLayout } from '../lib/tableLayout'
 import type { MatchSnapshot, StreamEvent } from '../lib/types'
 
 type Props = {
@@ -10,8 +11,16 @@ type Props = {
   onControl: (action: string) => void
 }
 
+type SeatBubble = {
+  key: string
+  seat: number
+  title: string
+  detail?: string
+}
+
 export function TableView({ match, events, actionPending, onAction, onControl }: Props) {
   const [raiseAmount, setRaiseAmount] = useState<number>(match.table.minimumRaiseTo || 0)
+  const [seatBubble, setSeatBubble] = useState<SeatBubble | null>(null)
   const boardCards = match.table.board ?? []
   const heroCards = match.table.heroCards ?? []
   const legalActions = match.table.legalActions ?? []
@@ -22,6 +31,15 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
   const visibleCardsBySeat = new Map((match.table.visibleHoleCards ?? []).map((item) => [item.seat, item.cards]))
   const latestDecisionLog = useMemo(() => [...decisionLog].reverse(), [decisionLog])
   const latestActionLog = useMemo(() => [...actionLog].reverse(), [actionLog])
+  const latestDecisionBySeat = useMemo(() => {
+    const map = new Map<number, (typeof decisionLog)[number]>()
+    for (const entry of latestDecisionLog) {
+      if (!map.has(entry.seat)) {
+        map.set(entry.seat, entry)
+      }
+    }
+    return map
+  }, [latestDecisionLog])
   const latestDecision = latestDecisionLog[0]
   const latestMeaningfulAction = useMemo(
     () => latestActionLog.find((entry) => !entry.action.startsWith('post_')),
@@ -41,10 +59,27 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
   const currentActor = match.players.find((player) => player.seat === match.table.currentTurnSeat)
   const turnStatus = describeTurnStatus(match, spectatorMode, currentActor?.name ?? null)
   const lifecycleStatus = describeLifecycleStatus(match)
+  const latestActionBubble = useMemo(
+    () => buildLiveSeatBubble(latestMeaningfulAction, latestDecisionBySeat.get(latestMeaningfulAction?.seat ?? -1)),
+    [latestMeaningfulAction, latestDecisionBySeat],
+  )
 
   useEffect(() => {
     setRaiseAmount(match.table.minimumRaiseTo || 0)
   }, [match.table.minimumRaiseTo, match.id, match.table.handNumber, match.table.stage])
+
+  useEffect(() => {
+    if (!latestActionBubble) {
+      setSeatBubble(null)
+      return
+    }
+
+    setSeatBubble(latestActionBubble)
+    const timeout = window.setTimeout(() => {
+      setSeatBubble((current) => (current?.key === latestActionBubble.key ? null : current))
+    }, 3000)
+    return () => window.clearTimeout(timeout)
+  }, [latestActionBubble])
 
   const raiseAction = useMemo(
     () => legalActions.find((action) => action.action === 'raise'),
@@ -93,7 +128,13 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
             </div>
 
             {match.players.map((player, index) => (
-              <div className={`table-seat-card ${player.seat === match.table.currentTurnSeat ? 'active' : ''}`} key={`${match.id}-${player.seat}`} style={seatStyles[index]}>
+              <div className={`table-seat-card ${player.seat === match.table.currentTurnSeat ? 'active' : ''}`} key={`${match.id}-${player.seat}`} style={seatStyles[index]} data-testid={player.seat === match.table.currentTurnSeat ? 'current-turn-seat' : undefined}>
+                {seatBubble?.seat === player.seat ? (
+                  <div className="seat-bubble" data-testid="seat-bubble">
+                    <strong>{seatBubble.title}</strong>
+                    {seatBubble.detail ? <span>{seatBubble.detail}</span> : null}
+                  </div>
+                ) : null}
                 <div className="seat-topline">
                   <span className="seat-name">{player.name}</span>
                   <div className="seat-badges">
@@ -106,8 +147,7 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
                 <small>{player.isHuman ? 'Human' : 'AI Seat'}</small>
                 {latestActionBySeat.has(player.seat) ? (
                   <div className="player-last-action">
-                    最近：{latestActionBySeat.get(player.seat)?.action}
-                    {latestActionBySeat.get(player.seat)?.amount ? ` ${latestActionBySeat.get(player.seat)?.amount}` : ''}
+                    最近：{formatSeatActionLabel(latestActionBySeat.get(player.seat)?.action, latestActionBySeat.get(player.seat)?.amount, latestDecisionBySeat.get(player.seat)?.publicReason)}
                   </div>
                 ) : (
                   <div className="player-last-action waiting">最近：等待本手动作</div>
@@ -242,10 +282,7 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
               <strong>最近动作</strong>
               <span>{latestMeaningfulAction.street.toUpperCase()}</span>
             </div>
-            <p>
-              {latestMeaningfulAction.playerName} 选择了 {latestMeaningfulAction.action}
-              {latestMeaningfulAction.amount ? ` ${latestMeaningfulAction.amount}` : ''}
-            </p>
+            <p>{describeLatestAction(latestMeaningfulAction.playerName, latestMeaningfulAction.action, latestMeaningfulAction.amount, latestDecisionBySeat.get(latestMeaningfulAction.seat)?.publicReason)}</p>
           </article>
         ) : null}
 
@@ -417,39 +454,41 @@ function describeLifecycleStatus(match: MatchSnapshot) {
   return { label: '进行中', tone: 'running' }
 }
 
-function seatLayout(count: number) {
-  const layouts: Record<number, Array<{ top: string; left: string; transform: string }>> = {
-    2: [
-      { top: '86%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '8%', left: '50%', transform: 'translate(-50%, -50%)' },
-    ],
-    3: [
-      { top: '86%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '18%', left: '20%', transform: 'translate(-50%, -50%)' },
-      { top: '18%', left: '80%', transform: 'translate(-50%, -50%)' },
-    ],
-    4: [
-      { top: '86%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '54%', left: '10%', transform: 'translate(-50%, -50%)' },
-      { top: '8%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '54%', left: '90%', transform: 'translate(-50%, -50%)' },
-    ],
-    5: [
-      { top: '86%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '68%', left: '12%', transform: 'translate(-50%, -50%)' },
-      { top: '16%', left: '24%', transform: 'translate(-50%, -50%)' },
-      { top: '16%', left: '76%', transform: 'translate(-50%, -50%)' },
-      { top: '68%', left: '88%', transform: 'translate(-50%, -50%)' },
-    ],
-    6: [
-      { top: '86%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '70%', left: '11%', transform: 'translate(-50%, -50%)' },
-      { top: '18%', left: '16%', transform: 'translate(-50%, -50%)' },
-      { top: '7%', left: '50%', transform: 'translate(-50%, -50%)' },
-      { top: '18%', left: '84%', transform: 'translate(-50%, -50%)' },
-      { top: '70%', left: '89%', transform: 'translate(-50%, -50%)' },
-    ],
+function describeLatestAction(playerName: string, action: string, amount: number, publicReason?: string) {
+  if (isRequestFailureReason(publicReason) && action === 'fold') {
+    return `${playerName} 因请求出错自动 fold。`
   }
+  return `${playerName} 选择了 ${action}${amount ? ` ${amount}` : ''}`
+}
 
-  return layouts[count] ?? layouts[6]
+function formatSeatActionLabel(action?: string, amount?: number, publicReason?: string) {
+  if (!action) return '等待本手动作'
+  if (isRequestFailureReason(publicReason) && action === 'fold') {
+    return '因请求出错自动 fold'
+  }
+  if (action === 'post_small_blind') {
+    return amount ? `small ${amount}` : 'small'
+  }
+  if (action === 'post_big_blind') {
+    return amount ? `big ${amount}` : 'big'
+  }
+  return `${action}${amount ? ` ${amount}` : ''}`
+}
+
+function buildLiveSeatBubble(
+  latestAction: { seat: number; playerName: string; action: string; amount: number; street: string } | undefined,
+  latestDecision: MatchSnapshot['table']['decisionLog'][number] | undefined,
+): SeatBubble | null {
+  if (!latestAction) return null
+
+  return {
+    key: `${latestAction.seat}-${latestAction.action}-${latestAction.amount}-${latestAction.street}`,
+    seat: latestAction.seat,
+    title: formatSeatActionLabel(latestAction.action, latestAction.amount, latestDecision?.publicReason),
+  }
+}
+
+function isRequestFailureReason(reason?: string) {
+  if (!reason) return false
+  return reason.includes('请求失败') || reason.includes('请求出错') || reason.includes('响应异常')
 }

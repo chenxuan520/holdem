@@ -181,6 +181,7 @@ export type AILog = {
   responseBody: string
   structured: unknown
   createdAt: string
+  attemptCount?: number
   error?: string
 }
 

@@ -159,9 +159,11 @@ func settleShowdown(snapshot *Snapshot, hidden *hiddenState) ([]pendingEvent, er
 
 	replayWinners := make([]ReplayWinner, 0, len(awards))
 	hand.RevealedCards = map[int][]string{}
+	for _, seat := range eligible {
+		hand.RevealedCards[seat] = cloneStrings(hand.HoleCards[seat])
+	}
 	for seat, amount := range awards {
 		snapshot.Players[seat].Chips += amount
-		hand.RevealedCards[seat] = cloneStrings(hand.HoleCards[seat])
 		replayWinners = append(replayWinners, ReplayWinner{
 			Seat:       seat,
 			PlayerName: snapshot.Players[seat].Name,
@@ -229,7 +231,7 @@ func finalizeHand(snapshot *Snapshot, hidden *hiddenState, winners []ReplayWinne
 		}
 	}
 
-	hidden.current.Board = append([]string(nil), hidden.hand.Board...)
+	hidden.current.Board = cloneStrings(hidden.hand.Board)
 	hidden.current.Pot = hidden.hand.Pot
 	hidden.current.Winners = append([]ReplayWinner(nil), winners...)
 	hidden.current.FinishedAt = time.Now().UTC()

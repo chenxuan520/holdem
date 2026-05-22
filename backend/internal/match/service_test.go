@@ -210,6 +210,9 @@ func TestRepeatedAIFailuresFallbackToFold(t *testing.T) {
 	if decision.Action != "fold" {
 		t.Fatalf("expected repeated request failure to fallback to fold, got %+v", decision)
 	}
+	if hidden.replay.AILogs[0].AttemptCount != 3 {
+		t.Fatalf("expected attemptCount 3, got %d", hidden.replay.AILogs[0].AttemptCount)
+	}
 	if len(hidden.replay.Hands) == 0 {
 		t.Fatalf("expected completed hand replay after AI fold fallback")
 	}
@@ -386,11 +389,94 @@ func TestHydrateLoadedMatchRevealsShowdownCards(t *testing.T) {
 	}
 
 	hydrateLoadedMatch(&snapshot, &record)
-	if len(snapshot.Table.VisibleHoleCards) != 1 {
-		t.Fatalf("expected 1 revealed AI hand after hydration, got %+v", snapshot.Table.VisibleHoleCards)
+	if len(snapshot.Table.VisibleHoleCards) != 2 {
+		t.Fatalf("expected hero and AI showdown hands after hydration, got %+v", snapshot.Table.VisibleHoleCards)
 	}
-	if snapshot.Table.VisibleHoleCards[0].PlayerName != "AI B" {
-		t.Fatalf("expected active showdown AI hand to be visible, got %+v", snapshot.Table.VisibleHoleCards)
+	if snapshot.Table.VisibleHoleCards[0].PlayerName != "你" || snapshot.Table.VisibleHoleCards[1].PlayerName != "AI B" {
+		t.Fatalf("expected hero and AI B showdown hands to be visible, got %+v", snapshot.Table.VisibleHoleCards)
+	}
+}
+
+func TestHydrateLoadedMatchRevealsAllShowdownParticipants(t *testing.T) {
+	snapshot := Snapshot{
+		ID: "match-2",
+		Players: []Player{
+			{Seat: 0, Name: "你", Chips: 100, IsHuman: true},
+			{Seat: 1, Name: "AI A", Chips: 140, PresetID: "ai-1"},
+			{Seat: 2, Name: "AI B", Chips: 160, PresetID: "ai-2"},
+		},
+		Status: "hand_complete",
+	}
+	record := ActiveMatchRecord{
+		Hand: &handState{
+			Number:          2,
+			Stage:           "river",
+			DealerSeat:      0,
+			SmallBlindSeat:  1,
+			BigBlindSeat:    2,
+			CurrentTurnSeat: -1,
+			Pot:             100,
+			Board:           []string{"Qs", "5h", "2h", "Tc", "9s"},
+			HoleCards: map[int][]string{
+				0: {"5s", "6c"},
+				1: {"Qh", "Kd"},
+				2: {"9d", "Jc"},
+			},
+			Folded:             map[int]bool{0: true, 1: false, 2: false},
+			AllIn:              map[int]bool{},
+			StreetContribution: map[int]int{},
+		},
+		Replay: ReplayDetail{},
+		Current: &ReplayHand{
+			Winners: []ReplayWinner{{Seat: 2, PlayerName: "AI B", Amount: 100, HandLabel: "两对"}},
+			Players: []ReplayPlayerState{
+				{Seat: 0, Name: "你", IsHuman: true, HoleCards: []string{"5s", "6c"}, Folded: true},
+				{Seat: 1, Name: "AI A", HoleCards: []string{"Qh", "Kd"}, Folded: false},
+				{Seat: 2, Name: "AI B", HoleCards: []string{"9d", "Jc"}, Folded: false},
+			},
+		},
+	}
+
+	hydrateLoadedMatch(&snapshot, &record)
+	if len(snapshot.Table.VisibleHoleCards) != 2 {
+		t.Fatalf("expected 2 showdown AI hands after hydration, got %+v", snapshot.Table.VisibleHoleCards)
+	}
+	if snapshot.Table.VisibleHoleCards[0].PlayerName != "AI A" || snapshot.Table.VisibleHoleCards[1].PlayerName != "AI B" {
+		t.Fatalf("expected AI A and AI B showdown hands to be visible, got %+v", snapshot.Table.VisibleHoleCards)
+	}
+}
+
+func TestGetReplayNormalizesNilSlices(t *testing.T) {
+	service := NewService(nil, nil)
+	service.replays["replay-1"] = ReplayDetail{
+		Summary: ReplaySummary{ID: "replay-1"},
+		Hands: []ReplayHand{{
+			HandNumber: 1,
+			Board:      nil,
+			Players: []ReplayPlayerState{{
+				Seat:      0,
+				Name:      "你",
+				HoleCards: nil,
+			}},
+			Events:  nil,
+			Winners: nil,
+		}},
+		Players: nil,
+		AILogs:  nil,
+	}
+
+	replay, ok := service.GetReplay("replay-1")
+	if !ok {
+		t.Fatalf("expected replay to exist")
+	}
+	if replay.Players == nil || replay.AILogs == nil {
+		t.Fatalf("expected top-level slices to be normalized, got %+v", replay)
+	}
+	if replay.Hands[0].Board == nil || replay.Hands[0].Events == nil || replay.Hands[0].Winners == nil {
+		t.Fatalf("expected hand slices to be normalized, got %+v", replay.Hands[0])
+	}
+	if replay.Hands[0].Players[0].HoleCards == nil {
+		t.Fatalf("expected player hole cards slice to be normalized")
 	}
 }
 

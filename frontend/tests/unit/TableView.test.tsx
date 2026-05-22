@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { TableView } from '../../src/pages/TableView'
 
@@ -55,6 +55,8 @@ describe('TableView', () => {
     expect(screen.getByText('现在轮到你操作')).toBeInTheDocument()
     expect(screen.getByText('最近动作')).toBeInTheDocument()
     expect(screen.getByText('最近：raise 30')).toBeInTheDocument()
+    expect(screen.getByTestId('current-turn-seat')).toBeInTheDocument()
+    expect(within(screen.getByTestId('seat-bubble')).getByText('raise 30')).toBeInTheDocument()
     expect(screen.queryByText('最近一次模型思考')).not.toBeInTheDocument()
     expect(screen.queryByText('测试私有理由')).not.toBeInTheDocument()
   })
@@ -116,6 +118,8 @@ describe('TableView', () => {
     expect(screen.getByText('最近一次模型思考')).toBeInTheDocument()
     expect(screen.getAllByText('私有思考').length).toBeGreaterThan(0)
     expect(screen.getByText('最近：call 5')).toBeInTheDocument()
+    expect(within(screen.getByTestId('seat-bubble')).getByText('call 5')).toBeInTheDocument()
+    expect(within(screen.getByTestId('seat-bubble')).queryByText('私有思考')).not.toBeInTheDocument()
   })
 
   it('shows paused lifecycle status when spectator table is waiting after a hand', () => {
@@ -213,5 +217,60 @@ describe('TableView', () => {
     expect(screen.getByText('这一手已经摊牌，AI 的亮牌会显示在桌面座位上。看完结果后，点击“继续下一手”。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '继续下一手' })).toBeInTheDocument()
     expect(screen.getAllByText((_, element) => element?.textContent === 'J♥').length).toBeGreaterThan(0)
+  })
+
+  it('shows request-error fallback folds explicitly', () => {
+    render(
+      <TableView
+        match={{
+          id: 'match-5',
+          status: 'hand_complete',
+          initialChips: 200,
+          smallBlind: 10,
+          bigBlind: 20,
+          players: [
+            { seat: 0, name: '你', chips: 200, isHuman: true, eliminated: false },
+            { seat: 1, name: 'AI A', chips: 190, isHuman: false, presetId: 'p1', eliminated: false },
+            { seat: 2, name: 'AI B', chips: 210, isHuman: false, presetId: 'p2', eliminated: false },
+          ],
+          table: {
+            handNumber: 1,
+            stage: 'preflop',
+            dealerSeat: 0,
+            smallBlindSeat: 1,
+            bigBlindSeat: 2,
+            currentTurnSeat: -1,
+            pot: 30,
+            board: [],
+            heroCards: ['Ts', '3h'],
+            visibleHoleCards: [],
+            toCall: 0,
+            minimumRaiseTo: 0,
+            legalActions: [],
+            actionLog: [
+              { seat: 1, playerName: 'AI A', action: 'post_small_blind', amount: 10, street: 'preflop' },
+              { seat: 2, playerName: 'AI B', action: 'post_big_blind', amount: 20, street: 'preflop' },
+              { seat: 0, playerName: '你', action: 'fold', amount: 0, street: 'preflop' },
+              { seat: 1, playerName: 'AI A', action: 'fold', amount: 0, street: 'preflop' },
+            ],
+            decisionLog: [
+              { seat: 1, playerName: 'AI A', stage: 'preflop', action: 'fold', amount: 0, publicReason: '模型连续请求失败，系统直接弃牌止损。', model: 'gpt-5.4', endpoint: 'https://llmbox-global.byteintl.net/v1' },
+            ],
+            lastWinners: ['AI B'],
+            completedHands: 1,
+          },
+          control: { spectatorMode: false, semiAutoMode: false, paused: false, manualMode: false, canStep: false, stopped: false, running: false },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }}
+        events={[]}
+        actionPending={false}
+        onAction={vi.fn()}
+        onControl={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('AI A 因请求出错自动 fold。')).toBeInTheDocument()
+    expect(screen.getByText('最近：因请求出错自动 fold')).toBeInTheDocument()
   })
 })

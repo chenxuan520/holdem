@@ -111,7 +111,7 @@ func buildTableState(players []Player, hand *handState, lastWinners []string) Ta
 	} else {
 		for _, player := range players {
 			cards, ok := hand.RevealedCards[player.Seat]
-			if !ok || len(cards) == 0 || player.IsHuman {
+			if !ok || len(cards) == 0 {
 				continue
 			}
 			visibleHoleCards = append(visibleHoleCards, VisibleHoleCards{

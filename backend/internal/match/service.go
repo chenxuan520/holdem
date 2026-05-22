@@ -174,7 +174,7 @@ func rebuildRevealedCardsFromReplay(players []Player, current *ReplayHand) map[i
 	}
 	revealed := map[int][]string{}
 	for _, player := range current.Players {
-		if player.IsHuman || player.Folded || len(player.HoleCards) == 0 {
+		if player.Folded || len(player.HoleCards) == 0 {
 			continue
 		}
 		revealed[player.Seat] = cloneStrings(player.HoleCards)
@@ -328,7 +328,10 @@ func (s *Service) GetReplay(id string) (ReplayDetail, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	replay, ok := s.replays[id]
-	return replay, ok
+	if !ok {
+		return ReplayDetail{}, false
+	}
+	return normalizeReplayDetail(replay), true
 }
 
 func (s *Service) DeleteReplay(id string) error {
@@ -467,7 +470,7 @@ func appendCurrentReplayHandIfNeeded(snapshot *Snapshot, hidden *hiddenState) {
 	if len(hidden.replay.Hands) > 0 && hidden.replay.Hands[len(hidden.replay.Hands)-1].HandNumber == hidden.current.HandNumber {
 		return
 	}
-	hidden.current.Board = append([]string(nil), hidden.hand.Board...)
+	hidden.current.Board = cloneStrings(hidden.hand.Board)
 	hidden.current.Pot = hidden.hand.Pot
 	hidden.current.FinishedAt = time.Now().UTC()
 	for index := range hidden.current.Players {

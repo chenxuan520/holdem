@@ -3,6 +3,7 @@ package match
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	backendai "holdem/backend/internal/ai"
 )
@@ -72,7 +73,8 @@ func (s *Service) applyAIDecision(id string, decision backendai.Decision, logEnt
 		RequestPayload: logEntry.RequestPayload,
 		ResponseBody:   logEntry.ResponseBody,
 		Structured:     decision,
-		CreatedAt:      hidden.hand.StartedAt,
+		CreatedAt:      time.Now().UTC(),
+		AttemptCount:   max(1, len(logEntry.Attempts)),
 		Error:          logEntry.Error,
 	})
 

@@ -68,8 +68,8 @@ func fallbackDecision(snapshot Snapshot, hand *handState, seat int) backendai.De
 func requestFailureDecision() backendai.Decision {
 	return backendai.Decision{
 		Action:        "fold",
-		PublicReason:  "模型连续请求失败，系统直接弃牌止损。",
-		PrivateReason: "模型连续 3 次请求失败，系统直接弃牌止损。",
+		PublicReason:  "因请求出错，系统直接弃牌止损。",
+		PrivateReason: "模型连续 3 次请求出错，系统直接弃牌止损。",
 	}
 }
 

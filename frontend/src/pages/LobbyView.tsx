@@ -1,4 +1,4 @@
-import type { Preset } from '../lib/types'
+import type { Preset, PresetProbeStatus } from '../lib/types'
 
 type Props = {
   presets: Preset[]
@@ -13,6 +13,8 @@ type Props = {
   loading: boolean
   creating: boolean
   error: string | null
+  probeStatuses?: Record<string, PresetProbeStatus>
+  probing?: boolean
   onHumanNameChange: (value: string) => void
   onInitialChipsChange: (value: number) => void
   onSmallBlindChange: (value: number) => void
@@ -24,6 +26,7 @@ type Props = {
   onUpdateAIName: (index: number, value: string) => void
   onRemoveSeat: (index: number) => void
   onCreate: () => void
+  onProbeAll?: () => void
 }
 
 export function LobbyView({
@@ -39,6 +42,8 @@ export function LobbyView({
   loading,
   creating,
   error,
+  probeStatuses = {},
+  probing = false,
   onHumanNameChange,
   onInitialChipsChange,
   onSmallBlindChange,
@@ -50,11 +55,15 @@ export function LobbyView({
   onUpdateAIName,
   onRemoveSeat,
   onCreate,
+  onProbeAll,
 }: Props) {
   const minAI = spectatorMode ? 2 : 1
   const maxAI = spectatorMode ? 6 : 5
   const totalPlayers = selectedAI.length + (spectatorMode ? 0 : 1)
   const canCreate = !loading && presets.length > 0 && selectedAI.length >= minAI && selectedAI.length <= maxAI && bigBlind >= smallBlind
+  const uniquePresetIds = Array.from(new Set(selectedAI))
+  const canProbe = !probing && !loading && uniquePresetIds.length > 0
+  const probeSummary = summarizeProbeStatuses(uniquePresetIds, probeStatuses)
 
   return (
     <>
@@ -182,9 +191,26 @@ export function LobbyView({
             ))}
           </div>
 
-          <button className="primary-button" onClick={onCreate} disabled={!canCreate || creating}>
-            {creating ? '正在创建比赛...' : spectatorMode ? '开始纯 AI 观战' : '开始一场新比赛'}
-          </button>
+          <div className="lobby-action-row">
+            <button className="primary-button" onClick={onCreate} disabled={!canCreate || creating}>
+              {creating ? '正在创建比赛...' : spectatorMode ? '开始纯 AI 观战' : '开始一场新比赛'}
+            </button>
+            <button
+              className="ghost-button"
+              onClick={onProbeAll}
+              disabled={!canProbe}
+              type="button"
+              data-testid="probe-all-button"
+            >
+              {probing ? '检测中...' : '一键检测 AI'}
+            </button>
+          </div>
+
+          {probeSummary ? (
+            <p className={`probe-summary ${probeSummary.tone}`} data-testid="probe-summary">
+              {probeSummary.label}
+            </p>
+          ) : null}
 
           {error ? <p className="error-text">{error}</p> : null}
         </section>
@@ -203,14 +229,26 @@ export function LobbyView({
               {selectedAI
                 .map((id) => presets.find((preset) => preset.id === id))
                 .filter(Boolean)
-                .map((preset, index) => (
-                  <article className="preset-card" key={`${preset!.id}-${index}`}>
-                    <span className="badge">AI #{index + 1}</span>
-                    <h3>{preset!.name}</h3>
-                    <p>{preset!.model}</p>
-                    <small>{preset!.systemPrompt}</small>
-                  </article>
-                ))}
+                .map((preset, index) => {
+                  const status = probeStatuses[preset!.id] ?? { state: 'idle' as const }
+                  return (
+                    <article className="preset-card" key={`${preset!.id}-${index}`}>
+                      <div className="preset-card-head">
+                        <span className="badge">AI #{index + 1}</span>
+                        <ProbeBadge status={status} />
+                      </div>
+                      <h3>{preset!.name}</h3>
+                      <p>{preset!.model}</p>
+                      {status.state === 'error' ? (
+                        <small className="probe-error" data-testid="probe-error-line">
+                          {truncate(status.error, 120)}
+                        </small>
+                      ) : preset!.systemPrompt ? (
+                        <small>{preset!.systemPrompt}</small>
+                      ) : null}
+                    </article>
+                  )
+                })}
             </div>
           </section>
 
@@ -241,4 +279,56 @@ function Metric({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   )
+}
+
+function ProbeBadge({ status }: { status: PresetProbeStatus }) {
+  if (status.state === 'idle') {
+    return <span className="probe-badge probe-idle">未检测</span>
+  }
+  if (status.state === 'pending') {
+    return <span className="probe-badge probe-pending">检测中</span>
+  }
+  if (status.state === 'ok') {
+    return (
+      <span className="probe-badge probe-ok">
+        可用 · {status.latencyMs}ms
+      </span>
+    )
+  }
+  return <span className="probe-badge probe-error">不可用</span>
+}
+
+function summarizeProbeStatuses(
+  presetIds: string[],
+  statuses: Record<string, PresetProbeStatus>,
+): { label: string; tone: string } | null {
+  if (presetIds.length === 0) return null
+  const states = presetIds.map((id) => statuses[id]?.state ?? 'idle')
+  if (states.every((s) => s === 'idle')) return null
+  if (states.includes('pending')) {
+    return { label: `正在逐个检测 ${presetIds.length} 个 AI 预设...`, tone: 'pending' }
+  }
+  const failed = presetIds.filter((id) => statuses[id]?.state === 'error')
+  const ok = presetIds.filter((id) => statuses[id]?.state === 'ok')
+  if (failed.length === 0 && ok.length > 0) {
+    const latencies = ok.map((id) => {
+      const s = statuses[id]
+      return s && s.state === 'ok' ? s.latencyMs : 0
+    })
+    const avg = Math.round(latencies.reduce((acc, v) => acc + v, 0) / latencies.length)
+    return { label: `${ok.length} 个 AI 全部可用，平均 ${avg}ms。`, tone: 'ok' }
+  }
+  if (ok.length === 0) {
+    return { label: `${failed.length} 个 AI 全部检测失败，请查看每个预设上的错误信息。`, tone: 'error' }
+  }
+  return {
+    label: `${ok.length} 个 AI 可用，${failed.length} 个失败 — 失败的预设上方红色徽标里有具体错误。`,
+    tone: 'mixed',
+  }
+}
+
+function truncate(value: string, max: number): string {
+  if (!value) return ''
+  if (value.length <= max) return value
+  return value.slice(0, max) + '...'
 }

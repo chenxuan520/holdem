@@ -87,6 +87,26 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
     [latestActionLog],
   )
 
+  // Spectator-only: let the user click a past decision in the feed to focus
+  // its full thought (similar to ReplayView's step navigation). When nothing
+  // is pinned, the focus tracks the latest decision automatically; once
+  // pinned, new decisions arriving in the feed don't yank the user away.
+  const decisionKey = (entry: DecisionEntry) =>
+    `${entry.stage}-${entry.seat}-${entry.action}-${entry.amount}-${entry.publicReason ?? ''}`
+  const [pinnedDecisionKey, setPinnedDecisionKey] = useState<string | null>(null)
+  useEffect(() => {
+    setPinnedDecisionKey(null)
+  }, [match.id])
+  const focusedDecision = useMemo<DecisionEntry | null>(() => {
+    if (!latestDecisionLog.length) return null
+    if (pinnedDecisionKey) {
+      const pinned = latestDecisionLog.find((entry) => decisionKey(entry) === pinnedDecisionKey)
+      if (pinned) return pinned
+    }
+    return latestDecisionLog[0]
+  }, [latestDecisionLog, pinnedDecisionKey])
+  const focusedDecisionKey = focusedDecision ? decisionKey(focusedDecision) : null
+
   const winnerSeatSet = useMemo(() => {
     const set = new Set<number>()
     if (match.status === 'hand_complete' || match.status === 'finished') {
@@ -128,6 +148,21 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
     }, 3000)
     return () => window.clearTimeout(timeout)
   }, [latestActionBubble])
+
+  // When the table sits still until the user clicks something, decorate the
+  // CTA button at the bottom of the table (or in the spectator control bar)
+  // with a green pulsing glow instead of injecting a banner that would shift
+  // the layout. Three independent flags so each button can light up
+  // separately. See `.needs-attention` rule in styles.css.
+  const needsContinueHand = match.status === 'hand_complete'
+  const needsResume = !hasHumanPlayer && (match.control?.paused ?? false) && match.status !== 'finished' && match.status !== 'stopped'
+  const needsManualStep =
+    !hasHumanPlayer &&
+    (match.control?.manualMode ?? false) &&
+    !match.control?.running &&
+    match.status !== 'hand_complete' &&
+    match.status !== 'finished' &&
+    match.status !== 'stopped'
 
   return (
     <div className="table-layout">
@@ -230,10 +265,11 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
         {spectatorMode ? (
           <div className="control-bar">
             <button
-              className="ghost-button"
+              className={`ghost-button ${needsResume ? 'needs-attention' : ''}`}
               onClick={() => onControl(match.control?.paused ? 'continue' : 'pause')}
               type="button"
               disabled={match.status === 'finished' || match.status === 'stopped'}
+              data-testid={needsResume ? 'cta-needs-attention' : undefined}
             >
               {match.control?.paused ? '继续' : '暂停'}
             </button>
@@ -262,18 +298,20 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
               手动模式
             </button>
             <button
-              className="primary-button inline"
+              className={`primary-button inline ${needsManualStep ? 'needs-attention' : ''}`}
               onClick={() => onControl('step')}
               type="button"
               disabled={!match.control?.manualMode || match.status === 'finished' || match.status === 'stopped'}
+              data-testid={needsManualStep ? 'cta-needs-attention' : undefined}
             >
               下一步
             </button>
             <button
-              className="primary-button inline"
+              className={`primary-button inline ${needsContinueHand ? 'needs-attention' : ''}`}
               onClick={() => onControl('continue')}
               type="button"
               disabled={match.status !== 'hand_complete'}
+              data-testid={needsContinueHand ? 'cta-needs-attention' : undefined}
             >
               继续下一手
             </button>
@@ -298,52 +336,72 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
 
             <div className="hero-footer-actions">
               <span className="section-label">当前可选动作</span>
-              <div className="action-pills">
-                {legalActions
-                  .filter((option) => option.action !== 'raise')
-                  .map((option) => (
-                    <button
-                      key={`${option.action}-${option.amount ?? 0}`}
-                      className="action-pill"
-                      onClick={() => onAction(option.action, option.amount)}
-                      disabled={actionPending}
-                      type="button"
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-              </div>
+              {/*
+                CRITICAL: only render the action pills when it's actually the
+                hero's turn. Backend `legalActions` is computed for whichever
+                seat is the current actor — including AI seats — so leaving
+                them clickable here used to surface "it is not the hero turn"
+                400s when the user clicked during an AI turn.
+              */}
+              {match.status === 'awaiting_human' ? (
+                <>
+                  <div className="action-pills">
+                    {legalActions
+                      .filter((option) => option.action !== 'raise')
+                      .map((option) => (
+                        <button
+                          key={`${option.action}-${option.amount ?? 0}`}
+                          className="action-pill"
+                          onClick={() => onAction(option.action, option.amount)}
+                          disabled={actionPending}
+                          type="button"
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                  </div>
 
-              {raiseAction ? (
-                <div className="raise-box">
-                  <input
-                    type="number"
-                    min={match.table.minimumRaiseTo || raiseAction.amount || 0}
-                    max={match.players.find((p) => p.isHuman)?.chips || raiseAction.amount || 0}
-                    value={raiseAmount}
-                    onChange={(event) => setRaiseAmount(Number(event.target.value) || 0)}
-                  />
-                  <button
-                    className="primary-button inline"
-                    disabled={actionPending}
-                    onClick={() => onAction('raise', raiseAmount)}
-                    type="button"
-                  >
-                    自定义加注
-                  </button>
-                </div>
+                  {raiseAction ? (
+                    <div className="raise-box">
+                      <input
+                        type="number"
+                        min={match.table.minimumRaiseTo || raiseAction.amount || 0}
+                        max={match.players.find((p) => p.isHuman)?.chips || raiseAction.amount || 0}
+                        value={raiseAmount}
+                        onChange={(event) => setRaiseAmount(Number(event.target.value) || 0)}
+                      />
+                      <button
+                        className="primary-button inline"
+                        disabled={actionPending}
+                        onClick={() => onAction('raise', raiseAmount)}
+                        type="button"
+                      >
+                        自定义加注
+                      </button>
+                    </div>
+                  ) : null}
+                </>
               ) : null}
 
               {match.status === 'hand_complete' ? (
                 <div className="raise-box">
-                  <button className="primary-button inline" onClick={() => onControl('continue')} type="button">
+                  <button
+                    className={`primary-button inline ${needsContinueHand ? 'needs-attention' : ''}`}
+                    onClick={() => onControl('continue')}
+                    type="button"
+                    data-testid={needsContinueHand ? 'cta-needs-attention' : undefined}
+                  >
                     继续下一手
                   </button>
                 </div>
               ) : null}
 
-              {legalActions.length === 0 && match.status !== 'hand_complete' ? (
-                <span className="action-hint">当前等待 AI 行动或手牌结算。</span>
+              {match.status !== 'awaiting_human' && match.status !== 'hand_complete' ? (
+                <span className="action-hint">
+                  {currentActor && !currentActor.isHuman
+                    ? `当前等待 ${currentActor.name} 操作`
+                    : '当前等待 AI 行动或手牌结算。'}
+                </span>
               ) : null}
             </div>
           </footer>
@@ -386,37 +444,72 @@ export function TableView({ match, events, actionPending, onAction, onControl }:
           </article>
         ) : null}
 
-        {spectatorMode && latestDecision ? (
-          <article className="latest-thought-card">
+        {spectatorMode && focusedDecision ? (
+          <article className="latest-thought-card" data-testid="focused-thought-card">
             <div className="decision-header">
-              <strong>最近一次模型思考</strong>
+              <strong>模型思考</strong>
               <span>
-                {latestDecision.playerName} · {latestDecision.stage.toUpperCase()}
+                {focusedDecision.playerName} · {focusedDecision.stage.toUpperCase()}
+                {focusedDecision !== latestDecision ? ' · 已固定' : ''}
               </span>
             </div>
-            <p>{latestDecision.privateReason || latestDecision.publicReason || '无额外思考说明'}</p>
+            <p className="thought-action-line">
+              <strong>动作：</strong>
+              {focusedDecision.action}
+              {focusedDecision.amount ? ` ${focusedDecision.amount}` : ''}
+            </p>
+            {focusedDecision.publicReason ? (
+              <p className="thought-public">
+                <strong>公开理由：</strong>
+                {focusedDecision.publicReason}
+              </p>
+            ) : null}
+            <p className="thought-private">
+              <strong>内部思考：</strong>
+              {focusedDecision.privateReason || focusedDecision.publicReason || '无额外思考说明'}
+            </p>
+            {focusedDecision !== latestDecision ? (
+              <button
+                className="ghost-button compact thought-unpin"
+                onClick={() => setPinnedDecisionKey(null)}
+                type="button"
+              >
+                返回最新
+              </button>
+            ) : null}
           </article>
         ) : null}
 
         <div className="action-feed">
           <div className="feed-header">
             <strong>动作流</strong>
-            <span>{spectatorMode ? '动作 + 模型思考（最新在最上）' : '人机对战不显示思考内容'}</span>
+            <span>{spectatorMode ? '动作 + 模型思考（点击切换查看，最新在最上）' : '人机对战不显示思考内容'}</span>
           </div>
           <div className="feed-list">
             {spectatorMode
-              ? latestDecisionLog.map((entry, index) => (
-                  <article className="feed-item is-thought" key={`thought-${entry.playerName}-${index}-${entry.stage}`}>
-                    <div className="feed-item-head">
-                      <strong>{entry.playerName}</strong>
-                      <span>
-                        {entry.stage.toUpperCase()} · {entry.action}
-                        {entry.amount ? ` ${entry.amount}` : ''}
-                      </span>
-                    </div>
-                    <p>{entry.privateReason || entry.publicReason || '无额外思考说明'}</p>
-                  </article>
-                ))
+              ? latestDecisionLog.map((entry, index) => {
+                  const key = decisionKey(entry)
+                  const isFocused = key === focusedDecisionKey
+                  return (
+                    <button
+                      className={`feed-item is-thought replay-step-button ${isFocused ? 'selected' : ''}`}
+                      key={`thought-${entry.playerName}-${index}-${entry.stage}`}
+                      onClick={() => setPinnedDecisionKey(isFocused ? null : key)}
+                      type="button"
+                      data-testid="spectator-thought-step"
+                    >
+                      <div>
+                        <strong>{entry.playerName}</strong>
+                        <small>
+                          {entry.stage.toUpperCase()} · {entry.action}
+                          {entry.amount ? ` ${entry.amount}` : ''}
+                        </small>
+                        <small>{entry.privateReason || entry.publicReason || '无额外思考说明'}</small>
+                      </div>
+                      <span>{isFocused ? '已选' : '#' + (index + 1)}</span>
+                    </button>
+                  )
+                })
               : null}
 
             {latestActionLog.map((entry, index) => (

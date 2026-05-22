@@ -9,6 +9,20 @@ export type Preset = {
   structuredOutput?: StructuredOutputMode
 }
 
+export type PresetProbeResult = {
+  ok: boolean
+  latencyMs: number
+  model?: string
+  responseSnippet?: string
+  error?: string
+}
+
+export type PresetProbeStatus =
+  | { state: 'idle' }
+  | { state: 'pending' }
+  | { state: 'ok'; latencyMs: number; snippet?: string; model?: string }
+  | { state: 'error'; latencyMs: number; error: string }
+
 export type Player = {
   seat: number
   name: string

@@ -1,7 +1,18 @@
 import { useEffect, useState } from 'react'
-import { clearRecords, controlMatch, createMatch, deleteRecord, fetchMatch, fetchPresets, fetchRecords, fetchReplay, submitAction } from './lib/api'
+import {
+  clearRecords,
+  controlMatch,
+  createMatch,
+  deleteRecord,
+  fetchMatch,
+  fetchPresets,
+  fetchRecords,
+  fetchReplay,
+  probePreset,
+  submitAction,
+} from './lib/api'
 import { subscribeMatchStream } from './lib/sse'
-import type { MatchSnapshot, Preset, RecordSummary, ReplayDetail, StreamEvent } from './lib/types'
+import type { MatchSnapshot, Preset, PresetProbeStatus, RecordSummary, ReplayDetail, StreamEvent } from './lib/types'
 import { HistoryView } from './pages/HistoryView'
 import { LobbyView } from './pages/LobbyView'
 import { ReplayView } from './pages/ReplayView'
@@ -39,7 +50,58 @@ export default function App() {
   const [replayLoading, setReplayLoading] = useState(false)
   const [deletingRecordID, setDeletingRecordID] = useState<string | null>(null)
   const [clearingRecords, setClearingRecords] = useState(false)
+  const [probeStatuses, setProbeStatuses] = useState<Record<string, PresetProbeStatus>>({})
+  const [probing, setProbing] = useState(false)
   const activeMatchID = match?.id ?? null
+
+  // Drop stale probe results when the user changes seats / models so old
+  // "ok" badges don't linger on a preset that's no longer at the table.
+  useEffect(() => {
+    setProbeStatuses((current) => {
+      const ids = new Set(selectedAI)
+      const next: Record<string, PresetProbeStatus> = {}
+      let changed = false
+      for (const id of Object.keys(current)) {
+        if (ids.has(id)) {
+          next[id] = current[id]!
+        } else {
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [selectedAI])
+
+  const handleProbeAll = async () => {
+    if (probing) return
+    const uniqueIds = Array.from(new Set(selectedAI))
+    if (uniqueIds.length === 0) return
+    setProbing(true)
+    setProbeStatuses((current) => {
+      const next = { ...current }
+      for (const id of uniqueIds) next[id] = { state: 'pending' }
+      return next
+    })
+    // Probe sequentially: if the user's network or token is bad we don't want
+    // to fan out N parallel hung requests, and the latencies stay readable.
+    for (const id of uniqueIds) {
+      try {
+        const result = await probePreset(id)
+        setProbeStatuses((current) => ({
+          ...current,
+          [id]: result.ok
+            ? { state: 'ok', latencyMs: result.latencyMs, snippet: result.responseSnippet, model: result.model }
+            : { state: 'error', latencyMs: result.latencyMs, error: result.error || '未知错误' },
+        }))
+      } catch (err) {
+        setProbeStatuses((current) => ({
+          ...current,
+          [id]: { state: 'error', latencyMs: 0, error: err instanceof Error ? err.message : String(err) },
+        }))
+      }
+    }
+    setProbing(false)
+  }
 
   useEffect(() => {
     let alive = true
@@ -368,6 +430,9 @@ export default function App() {
             onUpdateAIName={handleUpdateAIName}
             onRemoveSeat={handleRemoveSeat}
             onCreate={handleCreateMatch}
+            probeStatuses={probeStatuses}
+            probing={probing}
+            onProbeAll={handleProbeAll}
           />
         ) : null}
 

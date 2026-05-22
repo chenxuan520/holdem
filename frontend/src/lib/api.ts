@@ -1,4 +1,12 @@
-import type { CreateMatchPayload, MatchSnapshot, Preset, RecordSummary, ReplayDetail, ReplaySummary } from './types'
+import type {
+  CreateMatchPayload,
+  MatchSnapshot,
+  Preset,
+  PresetProbeResult,
+  RecordSummary,
+  ReplayDetail,
+  ReplaySummary,
+} from './types'
 
 async function parseJSON<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -17,6 +25,25 @@ export async function fetchPresets(): Promise<Preset[]> {
   const response = await fetch('/api/presets')
   const payload = await parseJSON<{ presets: Preset[] }>(response)
   return payload.presets
+}
+
+export async function probePreset(id: string): Promise<PresetProbeResult> {
+  // The backend returns 502 when the upstream provider rejects the probe (bad
+  // token, wrong endpoint, model not available, ...) and we still want to
+  // surface the structured body. We bypass parseJSON's status check and read
+  // either path uniformly.
+  const response = await fetch(`/api/presets/${encodeURIComponent(id)}/probe`, {
+    method: 'POST',
+  })
+  const body = (await response.json().catch(() => null)) as PresetProbeResult | { error?: string } | null
+  if (body && 'ok' in body) {
+    return body
+  }
+  return {
+    ok: false,
+    latencyMs: 0,
+    error: (body && 'error' in body && body.error) || `probe failed: ${response.status}`,
+  }
 }
 
 export async function createMatch(payload: CreateMatchPayload): Promise<MatchSnapshot> {

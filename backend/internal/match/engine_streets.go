@@ -185,6 +185,14 @@ func settleShowdown(snapshot *Snapshot, hidden *hiddenState) ([]pendingEvent, er
 }
 
 func startNextHandOrFinish(snapshot *Snapshot, hidden *hiddenState) ([]pendingEvent, error) {
+	// Flush the just-completed hand into replay.Hands now (instead of inside
+	// finalizeHand). At finalize time hidden.current.Events still misses the
+	// showdown / hand_settled / elimination / private_reason events that
+	// publishPending only appends after settleShowdown returns. By snapshotting
+	// here, those tail events are guaranteed to be in hidden.current.Events
+	// before we copy it into the persisted replay.
+	appendCurrentReplayHandIfNeeded(snapshot, hidden)
+
 	activeSeats := seatsWithChips(snapshot.Players)
 	if len(activeSeats) <= 1 {
 		snapshot.Status = "finished"
@@ -242,8 +250,15 @@ func finalizeHand(snapshot *Snapshot, hidden *hiddenState, winners []ReplayWinne
 		hidden.current.Players[index].AllIn = hidden.hand.AllIn[seat]
 		hidden.current.Players[index].Eliminated = snapshot.Players[seat].Eliminated
 	}
-	hidden.replay.Hands = append(hidden.replay.Hands, *hidden.current)
-	hidden.replay.Summary.HandsPlayed = len(hidden.replay.Hands)
+	// NOTE: do NOT push hidden.current onto hidden.replay.Hands here. The
+	// settle-time events (showdown_revealed / hand_settled /
+	// player_eliminated / private_reason_recorded) are still queued in the
+	// caller and only get appended to hidden.current.Events by
+	// publishPending afterwards. If we snapshot now, the slice header copy
+	// stored in replay.Hands locks in the smaller len and silently drops
+	// every tail event. The actual push is done in startNextHandOrFinish (or
+	// persistStoppedReplayLocked when the user stops mid-hand) once those
+	// tail events are guaranteed to be in hidden.current.Events.
 	hidden.hand.CurrentTurnSeat = -1
 	snapshot.Table.LastWinners = winnerNames(winners)
 	rebuildSnapshotTable(snapshot, hidden)

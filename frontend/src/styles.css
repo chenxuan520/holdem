@@ -427,6 +427,148 @@ select {
   line-height: 1.6;
 }
 
+.preset-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.preset-card .probe-error {
+  color: #ff9aa2;
+  background: rgba(255, 80, 96, 0.08);
+  border: 1px solid rgba(255, 80, 96, 0.22);
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin-top: 8px;
+  word-break: break-word;
+}
+
+.probe-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.probe-badge.probe-idle {
+  color: #8aa1c5;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.probe-badge.probe-pending {
+  color: #f5d68a;
+  background: rgba(255, 196, 64, 0.12);
+  border-color: rgba(255, 196, 64, 0.28);
+}
+
+.probe-badge.probe-ok {
+  color: #74e0a8;
+  background: rgba(80, 220, 140, 0.12);
+  border-color: rgba(80, 220, 140, 0.32);
+}
+
+.probe-badge.probe-error {
+  color: #ff9aa2;
+  background: rgba(255, 80, 96, 0.14);
+  border-color: rgba(255, 80, 96, 0.32);
+}
+
+/* === CTA NEEDS-ATTENTION HIGHLIGHT === */
+
+/* When the table is sitting still until the user clicks something
+ * (hand_complete -> 继续下一手, manual mode -> 下一步, paused -> 继续),
+ * we recolour the relevant button bright green and make it pulse so it's
+ * impossible to miss. We do NOT touch layout: zero size change, just colour
+ * and glow, so nothing on the page jumps when the state flips. */
+.needs-attention,
+.needs-attention.ghost-button,
+.needs-attention.primary-button.inline {
+  background: linear-gradient(135deg, #38c47a, #6be3a3) !important;
+  border-color: rgba(120, 220, 156, 0.6) !important;
+  color: #04230f !important;
+  font-weight: 700;
+  box-shadow:
+    0 0 0 2px rgba(120, 220, 156, 0.45),
+    0 10px 24px rgba(56, 196, 122, 0.35);
+  animation: cta-needs-attention 1.6s ease-in-out infinite;
+}
+
+.needs-attention:disabled {
+  opacity: 1; /* the button only gets needs-attention when we want it clicked */
+  cursor: pointer;
+}
+
+@keyframes cta-needs-attention {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px rgba(120, 220, 156, 0.45),
+      0 10px 24px rgba(56, 196, 122, 0.35);
+    filter: brightness(1);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px rgba(120, 220, 156, 0.6),
+      0 14px 30px rgba(56, 196, 122, 0.5);
+    filter: brightness(1.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .needs-attention {
+    animation: none;
+  }
+}
+
+.lobby-action-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.lobby-action-row .primary-button {
+  flex: 1 1 240px;
+}
+
+.probe-summary {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.probe-summary.pending {
+  background: rgba(255, 196, 64, 0.08);
+  border: 1px solid rgba(255, 196, 64, 0.22);
+  color: #f5d68a;
+}
+
+.probe-summary.ok {
+  background: rgba(80, 220, 140, 0.08);
+  border: 1px solid rgba(80, 220, 140, 0.22);
+  color: #98efbf;
+}
+
+.probe-summary.error {
+  background: rgba(255, 80, 96, 0.1);
+  border: 1px solid rgba(255, 80, 96, 0.28);
+  color: #ffb6bd;
+}
+
+.probe-summary.mixed {
+  background: rgba(255, 196, 64, 0.06);
+  border: 1px solid rgba(255, 196, 64, 0.18);
+  color: #ffd28a;
+}
+
 .badge {
   padding: 7px 10px;
   background: rgba(104, 172, 255, 0.16);
@@ -1195,6 +1337,43 @@ select {
 	margin: 10px 0 0;
 	color: #c9d7ef;
 	line-height: 1.7;
+}
+
+.latest-thought-card .thought-action-line,
+.latest-thought-card .thought-public,
+.latest-thought-card .thought-private {
+	margin: 8px 0 0;
+	font-size: 12.5px;
+	line-height: 1.65;
+	color: #c9d7ef;
+}
+
+.latest-thought-card .thought-action-line strong,
+.latest-thought-card .thought-public strong,
+.latest-thought-card .thought-private strong {
+	color: #9bb6dc;
+	font-weight: 600;
+	margin-right: 4px;
+}
+
+.latest-thought-card .thought-public {
+	color: #b6c8e2;
+}
+
+.latest-thought-card .thought-private {
+	color: #d6e2f6;
+}
+
+.latest-thought-card .thought-unpin {
+	margin-top: 12px;
+	font-size: 11.5px;
+	padding: 4px 10px;
+}
+
+.ghost-button.compact {
+	padding: 4px 12px;
+	font-size: 12px;
+	border-radius: 999px;
 }
 
 .decision-card p {

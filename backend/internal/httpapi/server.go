@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -26,6 +27,7 @@ func NewServer(presets []config.Preset, replayStore match.ReplayStore) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/presets", s.handlePresets)
+	mux.HandleFunc("/api/presets/", s.handlePresetByID)
 	mux.HandleFunc("/api/matches", s.handleMatches)
 	mux.HandleFunc("/api/matches/", s.handleMatchByID)
 	mux.HandleFunc("/api/records", s.handleRecords)
@@ -48,6 +50,37 @@ func (s *Server) handlePresets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"presets": public})
+}
+
+func (s *Server) handlePresetByID(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/presets/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		writeError(w, http.StatusNotFound, "preset route not found")
+		return
+	}
+	id := parts[0]
+	switch parts[1] {
+	case "probe":
+		if r.Method != http.MethodPost {
+			writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		defer cancel()
+		result, ok := s.matches.ProbePreset(ctx, id)
+		if !ok {
+			writeError(w, http.StatusNotFound, "preset not found")
+			return
+		}
+		status := http.StatusOK
+		if !result.OK {
+			status = http.StatusBadGateway
+		}
+		writeJSON(w, status, result)
+	default:
+		writeError(w, http.StatusNotFound, "preset route not found")
+	}
 }
 
 func (s *Server) handleMatches(w http.ResponseWriter, r *http.Request) {

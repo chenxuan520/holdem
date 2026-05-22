@@ -1,6 +1,7 @@
 package match
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -280,6 +281,21 @@ func (s *Service) GetMatch(id string) (Snapshot, bool) {
 	defer s.mu.RUnlock()
 	snapshot, ok := s.matches[id]
 	return snapshot, ok
+}
+
+// ProbePreset is the entry point behind the lobby's "test AI" button. It
+// returns a small structured result indicating whether the configured
+// endpoint / token / model actually answers, plus a latency measurement and
+// a short response snippet. The probe never creates a match and never
+// touches replay state, so it is cheap to call repeatedly.
+func (s *Service) ProbePreset(ctx context.Context, id string) (ai.ProbeResult, bool) {
+	s.mu.RLock()
+	preset, ok := s.presets[id]
+	s.mu.RUnlock()
+	if !ok {
+		return ai.ProbeResult{OK: false, Error: "unknown preset id"}, false
+	}
+	return s.ai.Probe(ctx, preset), true
 }
 
 func (s *Service) ListRecords() []RecordSummary {

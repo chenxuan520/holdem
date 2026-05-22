@@ -74,7 +74,12 @@ func (s *Service) runUntilPause(id string, snapshot Snapshot) (Snapshot, error) 
 		if !ok {
 			return Snapshot{}, fmt.Errorf("match not found")
 		}
-		if iterations > 2048 {
+		// State-transition safety net. Each hand burns roughly a few dozen
+		// iterations (player_acted / board_cards_dealt / private_reason /
+		// hand_settled / ...), so 131072 leaves headroom for thousands of
+		// hands of legitimate play before tripping; we keep the limit only
+		// to catch real infinite loops, not to cap session length.
+		if iterations > 131072 {
 			return current, fmt.Errorf("safety stop: too many state transitions in one run")
 		}
 		if current.Status == "finished" || current.Status == "awaiting_human" {
@@ -93,7 +98,11 @@ func (s *Service) runUntilPause(id string, snapshot Snapshot) (Snapshot, error) 
 
 		preset := s.presets[presetID]
 		aiRequests++
-		if aiRequests > 256 {
+		// AI-decision safety net. A 6-handed table averages ~10 AI requests
+		// per hand, so 8192 = ~800 hands of full-auto before we'd ever stop.
+		// Same reasoning as the iterations cap: the limit is for runaway
+		// loops, not for capping how long a benchmark can run.
+		if aiRequests > 8192 {
 			return current, fmt.Errorf("safety stop: too many ai decisions in one run")
 		}
 		decision, logEntry, err := s.ai.Decide(context.Background(), preset, input)

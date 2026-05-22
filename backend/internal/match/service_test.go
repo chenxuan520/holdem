@@ -290,17 +290,22 @@ func TestRepeatedAIFailuresFallbackToFold(t *testing.T) {
 	if hidden.replay.AILogs[0].AttemptCount != 3 {
 		t.Fatalf("expected attemptCount 3, got %d", hidden.replay.AILogs[0].AttemptCount)
 	}
-	if len(hidden.replay.Hands) == 0 {
-		t.Fatalf("expected completed hand replay after AI fold fallback")
+	// The hand is in hand_complete status; finalizeHand has populated
+	// hidden.current with the fold result, but hidden.replay.Hands stays
+	// empty until the next-hand transition (so settle-time events have a
+	// chance to land in hidden.current.Events first). Inspect hidden.current
+	// for the fold marker instead.
+	if hidden.current == nil {
+		t.Fatalf("expected current replay hand to exist after AI fold fallback")
 	}
 	aiFolded := false
-	for _, player := range hidden.replay.Hands[0].Players {
+	for _, player := range hidden.current.Players {
 		if player.Name == "AI 1" {
 			aiFolded = player.Folded
 		}
 	}
 	if !aiFolded {
-		t.Fatalf("expected AI player to be marked folded in replay")
+		t.Fatalf("expected AI player to be marked folded in current hand")
 	}
 }
 
@@ -555,6 +560,182 @@ func TestGetReplayNormalizesNilSlices(t *testing.T) {
 	if replay.Hands[0].Players[0].HoleCards == nil {
 		t.Fatalf("expected player hole cards slice to be normalized")
 	}
+}
+
+// TestPrepareHandShortBigBlindAvoidsCheckDeadlock reproduces the production
+// bug where a short-stacked BB seat ended up as the only contributor to the
+// CurrentBet reference, leaving the SB seat with contribution > CurrentBet
+// forever and dead-locking betting into an infinite check loop. The fix is
+// to set CurrentBet = max(SB contribution, BB contribution).
+func TestPrepareHandShortBigBlindAvoidsCheckDeadlock(t *testing.T) {
+	players := []Player{
+		{Seat: 0, Name: "Hero", Chips: 200, IsHuman: true},
+		{Seat: 1, Name: "GPT", Chips: 200},
+		// Seat 2 is intentionally left at chip == 5 so it gets picked as BB
+		// and then forced to post only 5 of the nominal 20.
+		{Seat: 2, Name: "ShortBB", Chips: 5},
+	}
+	updated, hand, _, _, err := prepareHand(players, 1, 0, 10, 20)
+	if err != nil {
+		t.Fatalf("prepareHand returned error: %v", err)
+	}
+	// Sanity: dealer=0, SB=1, BB=2. SB posts 10 fully; BB posts 5 (all-in).
+	if hand.SmallBlindSeat != 1 || hand.BigBlindSeat != 2 {
+		t.Fatalf("expected SB=1 BB=2, got SB=%d BB=%d", hand.SmallBlindSeat, hand.BigBlindSeat)
+	}
+	if hand.TotalContribution[1] != 10 {
+		t.Fatalf("expected SB to post full 10, got %d", hand.TotalContribution[1])
+	}
+	if hand.TotalContribution[2] != 5 {
+		t.Fatalf("expected BB to post partial 5, got %d", hand.TotalContribution[2])
+	}
+	if !hand.AllIn[2] {
+		t.Fatalf("expected short BB seat to be marked all-in")
+	}
+	if hand.CurrentBet != 10 {
+		t.Fatalf("expected CurrentBet to track SB amount (10) since it exceeds the partial BB (5), got %d", hand.CurrentBet)
+	}
+
+	// Now drive the betting round forward; if CurrentBet were the buggy 5,
+	// every subsequent action loops back into a check deadlock. With the
+	// fix, hero must call 10 to match SB, then SB checks, then the round
+	// completes and we advance past preflop.
+	snapshot := &Snapshot{Players: updated, SmallBlind: 10, BigBlind: 20}
+	hidden := &hiddenState{hand: hand, current: &ReplayHand{HandNumber: 1, Players: []ReplayPlayerState{
+		{Seat: 0, Name: "Hero", IsHuman: true, StartingChips: 200, EndingChips: 200, HoleCards: hand.HoleCards[0]},
+		{Seat: 1, Name: "GPT", StartingChips: 200, EndingChips: 190, HoleCards: hand.HoleCards[1]},
+		{Seat: 2, Name: "ShortBB", StartingChips: 5, EndingChips: 0, HoleCards: hand.HoleCards[2], AllIn: true},
+	}}}
+
+	// Hero (UTG, first to act preflop in 3-handed live) faces toCall = 10.
+	heroSeat := hand.CurrentTurnSeat
+	if heroSeat != 0 {
+		t.Fatalf("expected first preflop actor to be hero seat 0, got %d", heroSeat)
+	}
+	toCall := hand.CurrentBet - hand.StreetContribution[heroSeat]
+	if toCall != 10 {
+		t.Fatalf("expected hero toCall=10 (full SB amount), got %d", toCall)
+	}
+	if _, err := applyActionToState(snapshot, hidden, heroSeat, "call", 10, "", ""); err != nil {
+		t.Fatalf("hero call failed: %v", err)
+	}
+	// After hero calls, control should land on the SB seat with toCall=0
+	// (already at 10) and a check available.
+	if hand.CurrentTurnSeat != 1 {
+		t.Fatalf("expected SB to act next, got seat %d", hand.CurrentTurnSeat)
+	}
+	if got := hand.CurrentBet - hand.StreetContribution[1]; got != 0 {
+		t.Fatalf("expected SB toCall=0 after hero match, got %d", got)
+	}
+	if _, err := applyActionToState(snapshot, hidden, 1, "check", 0, "", ""); err != nil {
+		t.Fatalf("SB check failed: %v", err)
+	}
+	// Round must be complete now and stage must move past preflop.
+	if hand.Stage == "preflop" && !hand.HandOver {
+		t.Fatalf("expected betting round to advance off preflop, still on preflop with HandOver=%v", hand.HandOver)
+	}
+}
+
+// TestRunoutShowdownEventsLandInReplayHand reproduces the bug where a hand
+// that ends via auto-runout (e.g. turn all-in -> river dealt + showdown) used
+// to lose its tail events (river board_cards_dealt / showdown_revealed) in the
+// stored replay. The fix is to defer pushing hidden.current onto
+// hidden.replay.Hands until after publishPending has appended every settle-
+// time event.
+func TestRunoutShowdownEventsLandInReplayHand(t *testing.T) {
+	snapshot := &Snapshot{
+		ID:         "match-runout",
+		SmallBlind: 10,
+		BigBlind:   20,
+		Players: []Player{
+			{Seat: 0, Name: "你", Chips: 0, IsHuman: true},
+			{Seat: 1, Name: "AI A", Chips: 200, PresetID: "ai-1"},
+		},
+	}
+	hand := &handState{
+		Number:             1,
+		Stage:              "turn",
+		DealerSeat:         0,
+		SmallBlindSeat:     0,
+		BigBlindSeat:       1,
+		CurrentTurnSeat:    -1,
+		Board:              []string{"5h", "Jd", "7c", "Jh"},
+		Deck:               []string{"6d", "Qc", "Kh", "2s"},
+		HoleCards:          map[int][]string{0: {"Ad", "Th"}, 1: {"As", "Ac"}},
+		RevealedCards:      map[int][]string{},
+		Folded:             map[int]bool{},
+		AllIn:              map[int]bool{0: true, 1: true},
+		StreetContribution: map[int]int{0: 0, 1: 0},
+		TotalContribution:  map[int]int{0: 200, 1: 200},
+		Acted:              map[int]bool{0: true, 1: true},
+		CurrentBet:         0,
+		MinRaiseSize:       20,
+		Pot:                400,
+	}
+	current := &ReplayHand{
+		HandNumber: 1,
+		DealerSeat: 0,
+		Players: []ReplayPlayerState{
+			{Seat: 0, Name: "你", IsHuman: true, StartingChips: 200, EndingChips: 0, HoleCards: []string{"Ad", "Th"}},
+			{Seat: 1, Name: "AI A", PresetID: "ai-1", StartingChips: 200, EndingChips: 200, HoleCards: []string{"As", "Ac"}},
+		},
+	}
+	hidden := &hiddenState{hand: hand, current: current}
+
+	// Simulate publishPending in-place: every event we collect gets appended
+	// to hidden.current.Events the same way the real publishPending does.
+	publish := func(pending []pendingEvent) {
+		for i, ev := range pending {
+			hidden.current.Events = append(hidden.current.Events, ReplayEvent{
+				Sequence:   i + 1,
+				Type:       ev.EventType,
+				Visibility: ev.Visibility,
+				Timestamp:  time.Now().UTC(),
+				Payload:    ev.Payload,
+			})
+		}
+	}
+
+	// 1) Run the runout: turn -> river -> showdown.
+	pending, err := advanceStreet(snapshot, hidden)
+	if err != nil {
+		t.Fatalf("advanceStreet returned error: %v", err)
+	}
+	publish(pending)
+
+	// 2) Hand is now over; advancing state pushes it into replay.Hands.
+	more, err := advanceState(snapshot, hidden)
+	if err != nil {
+		t.Fatalf("advanceState returned error: %v", err)
+	}
+	publish(more)
+
+	if len(hidden.replay.Hands) != 1 {
+		t.Fatalf("expected 1 hand pushed to replay, got %d", len(hidden.replay.Hands))
+	}
+	storedEvents := hidden.replay.Hands[0].Events
+	have := map[string]bool{}
+	for _, ev := range storedEvents {
+		have[ev.Type] = true
+	}
+	for _, want := range []string{"board_cards_dealt", "showdown_revealed"} {
+		if !have[want] {
+			t.Fatalf("expected stored hand to contain %q event, got types %v", want, eventTypeList(storedEvents))
+		}
+	}
+
+	// And the stored board really is 5 cards including the river.
+	if len(hidden.replay.Hands[0].Board) != 5 {
+		t.Fatalf("expected stored board of 5 cards, got %v", hidden.replay.Hands[0].Board)
+	}
+}
+
+func eventTypeList(events []ReplayEvent) []string {
+	out := make([]string, 0, len(events))
+	for _, ev := range events {
+		out = append(out, ev.Type)
+	}
+	return out
 }
 
 type failingReplayStore struct{}

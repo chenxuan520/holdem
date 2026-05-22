@@ -37,6 +37,20 @@ func prepareHand(players []Player, handNumber int, dealerSeat int, smallBlind in
 		}
 	}
 
+	// CurrentBet must reflect the highest amount any blind actually got into
+	// the pot, NOT just the BB seat's contribution. When the BB player is
+	// short-stacked and forced to post a partial big blind that's smaller
+	// than the SB amount, betting still has to be measured against the SB's
+	// committed chips — otherwise SB sits at contribution > CurrentBet
+	// permanently, bettingRoundComplete never returns true, and the table
+	// dead-locks into an infinite check loop. Take the larger of the two
+	// posted amounts here so the rest of the engine has a consistent
+	// reference.
+	currentBet := totalContribution[bigBlindSeat]
+	if totalContribution[smallBlindSeat] > currentBet {
+		currentBet = totalContribution[smallBlindSeat]
+	}
+
 	hand := &handState{
 		Number:             handNumber,
 		DealerSeat:         dealerSeat,
@@ -51,7 +65,7 @@ func prepareHand(players []Player, handNumber int, dealerSeat int, smallBlind in
 		AllIn:              allIn,
 		StreetContribution: streetContribution,
 		TotalContribution:  totalContribution,
-		CurrentBet:         totalContribution[bigBlindSeat],
+		CurrentBet:         currentBet,
 		MinRaiseSize:       max(bigBlind, totalContribution[bigBlindSeat]),
 		CurrentTurnSeat:    firstPreflopTurnForPlayers(updatedPlayers, dealerSeat, bigBlindSeat),
 		Acted:              acted,
@@ -154,7 +168,23 @@ func buildTableState(players []Player, hand *handState, lastWinners []string) Ta
 func rebuildSnapshotTable(snapshot *Snapshot, hidden *hiddenState) {
 	snapshot.Table = buildTableState(snapshot.Players, hidden.hand, snapshot.Table.LastWinners)
 	snapshot.Table.DecisionLog = recentDecisionEntries(hidden.decisionTrail, 10)
-	snapshot.Table.CompletedHands = len(hidden.replay.Hands)
+	snapshot.Table.CompletedHands = completedHandCount(hidden)
+}
+
+// completedHandCount reports how many hands have already finished. The current
+// hand is counted as completed once finalizeHand has flagged HandOver=true,
+// even though the actual push into hidden.replay.Hands is deferred until the
+// next-hand transition (so that settle-time events still have a chance to be
+// appended to hidden.current.Events first).
+func completedHandCount(hidden *hiddenState) int {
+	count := len(hidden.replay.Hands)
+	if hidden.hand != nil && hidden.hand.HandOver && hidden.current != nil {
+		// Only count the in-flight hand if it has not yet been pushed.
+		if count == 0 || hidden.replay.Hands[count-1].HandNumber != hidden.current.HandNumber {
+			count++
+		}
+	}
+	return count
 }
 
 func postContribution(player *Player, streetContribution map[int]int, totalContribution map[int]int, requested int, seat int, allIn map[int]bool) {

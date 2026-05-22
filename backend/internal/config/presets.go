@@ -120,13 +120,17 @@ func normalizeStructuredOutput(value string) (string, error) {
 }
 
 func (p Preset) validate() error {
+	// system_prompt is intentionally optional: the AI client ships a complete
+	// NLHE decision framework + output contract by itself, and benchmark
+	// presets are expected to keep the YAML system_prompt empty so every model
+	// gets exactly the same prompt context. Only the connection fields are
+	// strictly required.
 	required := map[string]string{
-		"id":            strings.TrimSpace(p.ID),
-		"name":          strings.TrimSpace(p.Name),
-		"endpoint":      strings.TrimSpace(p.Endpoint),
-		"token":         strings.TrimSpace(p.Token),
-		"model":         strings.TrimSpace(p.Model),
-		"system_prompt": strings.TrimSpace(p.SystemPrompt),
+		"id":       strings.TrimSpace(p.ID),
+		"name":     strings.TrimSpace(p.Name),
+		"endpoint": strings.TrimSpace(p.Endpoint),
+		"token":    strings.TrimSpace(p.Token),
+		"model":    strings.TrimSpace(p.Model),
 	}
 	for field, value := range required {
 		if value == "" {

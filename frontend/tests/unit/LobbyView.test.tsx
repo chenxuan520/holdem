@@ -78,4 +78,46 @@ describe('LobbyView', () => {
     expect(screen.getByDisplayValue('你')).toBeInTheDocument()
     expect(screen.getByDisplayValue('Alpha')).toBeInTheDocument()
   })
+
+  it('exposes a one-click probe-all button and forwards the click', async () => {
+    const onProbeAll = vi.fn()
+    renderLobby({ onProbeAll })
+
+    const button = screen.getByTestId('probe-all-button')
+    expect(button).toHaveTextContent('一键检测 AI')
+    expect(button).not.toBeDisabled()
+
+    await userEvent.click(button)
+    expect(onProbeAll).toHaveBeenCalledTimes(1)
+  })
+
+  it('reflects probe statuses on preset cards and summary line', () => {
+    renderLobby({
+      selectedAI: ['a', 'b', 'a'],
+      aiPlayerNames: ['Alpha', 'Bravo', 'Alpha #2'],
+      probeStatuses: {
+        a: { state: 'ok', latencyMs: 248, snippet: 'pong' },
+        b: { state: 'error', latencyMs: 0, error: 'http 401: unauthorized token' },
+      },
+    })
+
+    // ok latency renders in badge form (preset a appears twice, so 2 badges)
+    expect(screen.getAllByText('可用 · 248ms').length).toBe(2)
+    // error preset shows the failure inline so the user can read the cause
+    expect(screen.getAllByText('不可用').length).toBeGreaterThan(0)
+    expect(screen.getByText('http 401: unauthorized token')).toBeInTheDocument()
+    // mixed summary mentions both counts
+    const summary = screen.getByTestId('probe-summary')
+    expect(summary.className).toMatch(/mixed/)
+    expect(summary.textContent).toMatch(/可用/)
+    expect(summary.textContent).toMatch(/失败/)
+  })
+
+  it('disables probe button while a probe is in flight', () => {
+    renderLobby({ probing: true })
+
+    const button = screen.getByTestId('probe-all-button')
+    expect(button).toBeDisabled()
+    expect(button).toHaveTextContent('检测中')
+  })
 })

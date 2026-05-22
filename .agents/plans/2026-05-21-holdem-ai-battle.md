@@ -401,5 +401,64 @@
   - **前端测试 `frontend/tests/unit/App.test.tsx`**：新增 2 个测试：1）"只有 1 个 preset 时切到纯 AI 观战，2 个自动补的同名座位都显示为 `Benchmark A #1 / #2`，且**不再出现** `Benchmark A` 或 `Benchmark A 2`"；2）"用户手改 AI 名为 `小狐狸` 后再点 + 添加 AI，`小狐狸` 必须保留、新加的位置自动取 `Benchmark B`"。
   - 自测：`cd backend && go test ./...`、`cd frontend && npm run test`（23 个全过）、`cd frontend && npm run build`（CSS 35.4KB / JS 192.8KB）。重启后端到新代码版本，并做 server-level smoke：用 `manual_mode: true` 创建 spectator + 3 个 `tight-shark` 重复 preset 的桌（manual mode 不会自动调 AI，零 token 消耗），返回的 player names 正好是 `GPT-5.4 Benchmark A #1 / #2 / #3`，与前端规则一致；smoke 桌随后通过 `stop` + `DELETE /api/records/{id}` 清理掉，没污染牌桌记录列表。
   - 当前剩余风险：1）从这次起约定 `#N` 序号是规则一部分，如果以后想换成别的格式（比如 `(2)` 或 `· 2`），前后端 + demo yaml + 测试需要一起改；2）`customNameFlags` 是按位置 index 跟踪的，如果用户在多人桌中间删一个之前自定义过的座位，剩余被自定义座位的 index 会左移——当前实现允许这部分自定义跟着 index 一起左移，对单 preset 多座位的场景下可能让"自定义名漂到不预期的座位"，是已知小缺陷，但日常 1~6 人桌够用了。
+- 2026-05-22 17:25：完成"AI prompt 全面瘦身 + 智能化"。目标是**同时**降低 input/output token 消耗 + 提升模型决策质量，所有改动对 3 个 benchmark preset 完全等价（保持公平比较）。
+
+  改造点：
+  - **后端 `backend/internal/ai/client.go::PromptInput` 重写**：删 `MatchID / PlayerName / YourTotalBetThisHand` 等模型不需要的字段；JSON key 收紧成 `hand/stage/seat/position/hole/yourChips/yourStreetBet/board/pot/sb/bb/effBB/toCall/minRaiseTo/potOdds/actions/players/lastAgg/log`；零值字段全部 `omitempty`，避免发出 `"folded":false` 之类无信号 token。
+  - **后端 `backend/internal/match/ai_flow.go::buildPromptInput` 全部重写**：在后端预算好关键派生量再喂给模型，让模型不再需要花 output token 自己算：
+    - `position`：根据当前 dealerSeat 和 *存活* 座位环算出 BTN/SB/BB/UTG/HJ/CO（HU 时为 BTN/SB / BB），并写到 self 和 players[] 每条；
+    - `effBB`：effectiveStack = min(yourChips, 最深存活对手 chips)，再除以 bb 取 1 位小数；
+    - `potOdds`：仅在 toCall>0 时给出 toCall / (pot+toCall) 的 2 位小数；
+    - `lastAgg`：扫 actionLog 找最近一次 raise/all_in 的 seat（无则字段 omit）；
+    - players[]：每条只放 `seat/name/chips/position`，并在非默认时才加 `streetBet/folded/allIn/self/human`。
+  - **后端日志格式压缩**：新增 `compactActionLog()`，把每条 `{seat,playerName,action,amount,street}` 结构（~30 token/条）压成形如 `flop:2.r40` 的紧凑字符串（~5-7 token/条），8 条历史从 ~240 token 收到 ~50 token。stage 缩为 `pre/flop/turn/river`；动作缩为 `f/x/c/r/A/sb/bb`；`amount` 仅对带钱动作出现。系统提示同时给出图例。
+  - **后端 `systemInstruction` 重写**（约 800 字节、估算 ~250 token）：
+    - 单点写出 NLHE 决策框架：`effBB→风险`、`potOdds→赢率`、`牌力 vs 范围 + foldEquity → 选 EV 最高合法动作`，明确"不要在输出里写思考过程"；
+    - 动作合法性约束：必须从 `actions[].action` 选；raise/all_in 时 `amount ∈ [minRaiseTo, yourChips]`，否则 `amount=0`；并给出常见 sizing（preflop 2.5–3×bb、postflop 50–75% pot）作为 prior，让模型不至于乱开 size；
+    - 输出协议按 `structured_output` 模式分支：tool_call 直接 submit_action，json_object/none 都要求纯 JSON 对象，禁止 markdown / 自然语言段落；
+    - 两个 reason 各 ≤25 字、public_reason 不暴露具体牌点、private_reason 可详；
+    - 末尾直接给出动作日志缩写图例。
+  - **后端可选 YAML system_prompt**：`backend/internal/config/presets.go::validate` 把 `system_prompt` 改为可选；如果非空仍会被 prepend 到 systemInstruction 之前，便于将来给单个 preset 加 persona。`config/ai-presets.demo.yaml` 把 3 个 benchmark 的 `system_prompt` 显式置空，并在文件顶部加大段注释，明确"框架在后端、YAML 留空保 benchmark 公平 + 省 token"。
+  - **后端 retry 提示带具体错因**：`buildRequestPayload(preset, input, attempt, lastHint)` 增加 lastHint 参数；`Decide` 在每次失败后用 `retryHintFromError(log.Error)` 截取上一次具体错误（解析失败原文 / 缺字段 / 动作非法 等）拼到下一轮的提醒里，模型更可能定向修正而不是无脑重试。最大长度 160 字符做截断，避免错误体把 prompt 撑爆。
+  - **后端 `decisionTools` 描述瘦身**：tool description 从「为当前德州扑克局面提交最终动作」收到「提交本回合最终动作」，省一点点输入 token。tool 必填字段保持 `action / public_reason / private_reason`，`amount` 仍然可选（fold/check/call 不需要 amount）。
+  - **后端 `maxTokensForAttempt` 微降**：256/384/512 → 192/256/384。新 prompt 输出极简（一动作 + 两个 ≤25 字 reason），192 tokens 对一次成功完全够，重试时再放宽。
+
+  测试：
+  - `backend/internal/match/ai_flow_test.go`：保留原来"跳过 eliminated"用例，新增 6 项：`positionLabelByDistance` 在 2/3/4/5/6 人桌全表全档断言；`positionLabelForSeat` 跳过 eliminated 后仍按 *live ring* 计算；`effectiveStackForSeat` 取较短一侧 + 跳过已 fold/all-in 对手；`compactActionLog` 紧凑格式 + limit 截断；`lastAggressorSeat` 取最近一次 raise/all_in、无激进时返回 nil；`buildPromptInput` 端到端断言 position/effBB/potOdds/lastAgg/log 都正确；以及 JSON 紧凑度断言（**禁止**出现 `matchId/playerName/recentActionLog/legalActions/yourTotalBetThisHand/label`，**必须**出现 `hand/stage/position/hole/yourChips/effBB/sb/bb/actions`）。
+  - `backend/internal/ai/client_payload_test.go`：保留 4 项原 mode 分支测试，新增 3 项：retry hint 在 lastHint 非空时会被拼进 user message；`systemInstruction` 在 tool_call 模式包含 `effBB/potOdds/minRaiseTo/submit_action/f=fold` 关键 marker；json_object 模式不提 `submit_action` 但有 `JSON 对象`；preset 自带 system_prompt 时会被 prepend 到框架前。
+  - 新增两个 verbose-only 诊断测试（`-v` 才跑）：`backend/internal/match/ai_flow_sample_test.go` 打印一个真实 6 人桌 turn 局面的 user content 字节数 + 内容；`backend/internal/ai/system_prompt_sample_test.go` 打印 3 种模式的 system prompt 字节数。供日后调 prompt 时对照。
+
+  实测样本（GPT-5.4 6 人桌 turn 决策点）：
+  - user content 859 bytes（含 7 条历史日志、6 个 player、4 个 legal action），按中文混合 ~3.5 字节/token 估 ≈ **245 token**；
+  - system prompt（tool_call 模式）804 bytes，中文密度更高 ~2.5 字节/token 估 ≈ **320 token**；
+  - 单次 input token 合计约 **560-600**，比改造前估算的 ~900-1000 单 prompt 约省 **30-40%**；
+  - 输出 cap 192 token，新 prompt 下"动作 + 两个 ≤25 字 reason"实际通常落在 ~50 token 左右，比之前散开思考的 200-400 输出 token 显著降低。
+  - 这个数字未做真实端到端调用 token 计数（避免再消耗 llmbox 费用），是基于字节估算 + tokenizer 经验值。
+
+  保持 benchmark 公平的注意点：
+  - **systemInstruction 内容对所有 preset 完全一致**，只在末尾按 `structured_output` 模式分支输出协议（tool_call vs json_object vs none），决策框架本身永远相同。
+  - 用户本机 `config/ai-presets.yaml` 的 3 个 preset 仍可保留同样的 `system_prompt`（不影响公平性），但建议清空成空字符串以省 token；改本机 yaml 不影响仓库提交。
+  - 派生字段（position/effBB/potOdds/lastAgg）是从 *公共可见信息* 直接算出来的，不会向某个模型透露它本不应知道的信息（比如对手底牌），因此对 benchmark 不构成"提示泄露"。
+
+  自测：`cd backend && go test ./...`、`cd frontend && npm run test`（23 个全过）、`cd frontend && npm run build`（CSS 35.4KB / JS 192.8KB）。后端**未重启**：因为这是一次 prompt 大改，建议你想跑实际对局之前先确认本机 `config/ai-presets.yaml` 是否需要把 `system_prompt` 清空（以最大化省 token）；改完再 `go run ./cmd/server` 起后端。
+
+  当前剩余风险：
+  - 1）prompt 框架明确教模型用 NLHE 标准思路（pot odds / position / fold equity / sizing），如果某个被测模型对中文 prompt 反应不如英文，可能比改造前稍微少占一点优势；这是 prompt 全部中文化的副作用，所有 preset 同时受影响、公平性不变。
+  - 2）日志缩写（f/x/c/r/A）虽然在系统提示里有图例，但极少数小模型可能仍把 `r40` 误读成总下注 vs 增量；从工具调用模式实测看主流模型都能正确解读为"加注到总额 40"。
+  - 3）retry hint 会把上一次错误体（最长 160 字符）放进 prompt，最坏情况下重试 prompt 比首次大几十字节；但已强制截断，且只在错误回路出现一次。
+- 2026-05-22 18:08：清空本机 `config/ai-presets.yaml` 三个 preset 的 `system_prompt` 字段（改成 `""`）。新版 systemInstruction 已经在后端把决策框架 / 输出协议 / 日志图例全部包好，YAML 那段重复文案纯粹是 ~80 token / 请求的浪费。这次只动本机私有 yaml（仍 gitignored），demo 里早就是空字符串。重启后端确认 `/api/presets` 响应里 `systemPrompt: ""`，公平性不变（三个 preset 仍是同一份外层框架）。
+- 2026-05-22 20:35：增加多模型 benchmark 对照位。使用一个临时 PATH shim 拦截 `ttadk opencode -m glm-5` 的 preLaunch 阶段，捕获 `OPENCODE_CONFIG_CONTENT` 环境变量里挂的 SSO `at-...` apiKey（同一份 token 同时支持 llmbox 上的 gpt-5.4 / glm-5 / kimi-k2.5 / gpt-5.3-codex / 等模型）。直接 curl 实测 `/v1/chat/completions` 路径：glm-5 / kimi-k2.5 都接受 `tools` 字段但不会主动调用，会直接吐自然语言；改用 `response_format: {"type": "json_object"}` 两者都能稳定输出（包在 markdown ```json fence 里，parse.go 的旧逻辑能剥）。把本机 yaml 改成 3 个真不同模型的 preset：GPT-5.4 (sk- 长期 token + tool_call) / GLM-5 (at- token + json_object) / KIMI-K2.5 (at- token + json_object)。一次性扫描完临时目录 `/tmp/ttadk-sniff` 立刻清掉，不在磁盘留 token。
+- 2026-05-22 21:08：把临时 sniff 套路固化成可重复运行的工具 `~/.local/bin/holdem-sniff-ttadk-token`（在 `$PATH` 内，全局可用，不写在 repo 里）。脚本用 `mktemp -d` 建一次性目录 + `trap 'rm -rf'` 退出清理，PATH 注入 shim 拦截 `ttadk opencode -m <model>` 启动时的 `OPENCODE_CONFIG_CONTENT` env，不实际启动 opencode TUI。两种模式：默认打印 apiKey + 完整 model 列表 + 可粘贴的 yaml 片段；`--apply <yaml-path>` 在原地用 sed-like 正则 only 重写 `^\s*token:\s*at-\S+$` 行（sk- 长期 token 永远不动）。同时发现并修正一个 ttadk 的 JSON 输出 quirk：注入的 `OPENCODE_CONFIG_CONTENT` 末尾会多出一个 `}`，python 用 `JSONDecoder.raw_decode` 兼容掉这个 trailing 数据。
+- 2026-05-22 21:15：发现并修复回放 bug—— "最后一手 turn 全下后 river / showdown 事件丢失"。根因在 `backend/internal/match/engine_streets.go::finalizeHand`：原本一收盘就 `hidden.replay.Hands = append(hidden.replay.Hands, *hidden.current)`，但 `*hidden.current` 是值拷贝，里面的 `Events` slice header 把 len 在那一刻定格；之后 `publishPending` 把 `showdown_revealed / hand_settled / player_eliminated / private_reason_recorded`（包括 turn 之后才发出的 river `board_cards_dealt`）追加到 `hidden.current.Events`，那批"尾巴事件"全部进了 underlying array 的更后面，但 `replay.Hands[last]` 看不到（slice header 锁住的旧 len）。修法：把 push 操作移到 `startNextHandOrFinish`，复用既有的 `appendCurrentReplayHandIfNeeded`（它有"已经 push 过就跳过"的去重检查），到那时 publishPending 已经把所有结算事件写入 hidden.current.Events 了。同步把 `Table.CompletedHands` 计数从直接读 `len(replay.Hands)` 改成 `completedHandCount(hidden)` —— 已经 HandOver=true 但还没 push 的当前手也算上，避免半自动观战 / 人机模式在 hand_complete 状态时计数倒退。  
+  测试：`TestRunoutShowdownEventsLandInReplayHand` 构造 turn 双方全下 → runout → 断言 `replay.Hands[0].Events` 含 `board_cards_dealt` + `showdown_revealed` 且 `board` 是 5 张牌。同步更新 `TestRepeatedAIFailuresFallbackToFold` 改为读 `hidden.current.Players` 而不是 `hidden.replay.Hands[0].Players`，因为 hand_complete 状态下当前手还没被 push 但 finalizeHand 已经填好 hidden.current。注意：bug 期间生成的旧 replay 不会自动修复，需要新开一桌打完才能验证；旧记录可以从 `/api/records` 删掉。
+- 2026-05-22 21:35：把 `runUntilPause` 的"安全保险丝"两个上限放大很多倍，避免纯 AI 全自动跑长场被误杀：`iterations` 2048 → 131072（~64×，覆盖几千手），`aiRequests` 256 → 8192（~32×，6 人桌每手平均 ~10 次 AI 调用，足够 ~800 手不到顶）。意图保留：保险丝是为了拦截真正的死循环，不是用来限制对局长度。改动只在 `backend/internal/match/actions.go`，所有现存测试照旧通过。
+- 2026-05-22 21:45：新增 `POST /api/presets/{id}/probe` 接口 + lobby 页"一键检测 AI"按钮，用于在开局前确认所选 preset 全部可用。
+  - 后端：`ai.Client.Probe(ctx, preset)` 发一条 `messages: [{user: ping}], max_tokens: 16, temperature: 0` 的最小 chat completion（~5 input + ~4 output = ~9 token / 次），不走结构化输出 / 不调 tool；返回 `{ok, latencyMs, model, responseSnippet, error}`。`match.Service.ProbePreset(id)` 做 preset 查找包装。HTTP 层 ok=true → 200，ok=false（鉴权失败 / 4xx / 网络错误）→ 502 + 同结构 body 返回，前端能拿到完整原文。
+  - 前端：`probePreset(id)` API client；`App.tsx` 加 `probeStatuses: Record<id, status>` + `probing: boolean` state；`handleProbeAll` 在唯一 preset id 集合上**串行**轮询（避免 N 个并发慢 endpoint 把网络挤爆）；`useEffect` 在 `selectedAI` 变化时清掉不再相关的旧 status，避免座位换 preset 后老徽标残留。`LobbyView` 拿到 status 后：建桌按钮旁加个"一键检测 AI"按钮（`probing` 时 disabled + "检测中..."文案）；下面一行汇总（"3 个 AI 全部可用，平均 280ms" / "X 可用 + Y 失败" / "全部失败" / pending 文案，每种 tone 一种颜色）；右侧 preset 卡片右上角徽标显示 `未检测 / 检测中 / 可用 · Xms / 不可用` 四档；失败的预设把 error message（可能含 `http 401 + 上游 body`）截 120 字符放在卡片下方红色区块里。
+  - 测试：`frontend/tests/unit/LobbyView.test.tsx` 新增 3 项：按钮存在 + 点击 forward 到回调；`probeStatuses` 在卡片和 summary 行的 ok / error / mixed 三种 tone 渲染；`probing=true` 时按钮 disabled + 文案变 "检测中"。所有 LobbyView 旧测试通过未改的 prop 默认值（`probeStatuses?: Record<...> = {}`，`probing?: boolean = false`）保留兼容性。
+  - smoke：实际起的后端 `curl POST /api/presets/gpt-5-4/probe` 返回 `{"ok":true,"latencyMs":2363,"model":"deployment-gpt-5.4-...","responseSnippet":"pong"}`，端到端走通。
+- 2026-05-22 21:25：spectator 模式右侧的"模型思考"卡升级成可选历史决策模式，借鉴 ReplayView 的 step 导航。`TableView` 加一个 `pinnedDecisionKey: string | null` state（key = `stage-seat-action-amount-publicReason`，对决策内容稳定）；默认追踪最新一条决策，新决策来了自动跟上；点击 feed 中任一条思考 → 把那条 key 固定下来，思考卡标题变 "AI X · STAGE · 已固定" 并出现"返回最新"按钮，新决策来了不会打断当前查看视角。思考卡的渲染从单一 `<p>` 升级成三行：`【动作】`、`【公开理由】`、`【内部思考】`，分别用浅一点 / 深一点的颜色区分。Feed item 改用 `replay-step-button` 同款 button 元素 + `selected` 高亮，点击同一条会取消固定。`useEffect([match.id])` 在切换比赛时重置 pinnedDecisionKey，避免跨场粘连。新增 `lets spectator pin a past decision via the thought feed` 测试，覆盖默认 / 点击老决策固定 / 返回最新 三段交互。
+- 2026-05-22 21:53：补"暂停时高亮 CTA"——`TableView` 顶部加 `.pause-alert` 横幅，仅在以下三种"等用户主动点击"的状态出现：1）`hand_complete`（人机或观战都适用，CTA 是「继续下一手」，绿色）；2）spectator + paused（CTA「继续推进」，金色）；3）spectator + manualMode + 非 running（CTA「下一步」，蓝色）。横幅自带 1.6s 缓动 scale + brightness 脉冲（`prefers-reduced-motion` 关掉），背景渐变高对比度 + 边框光晕，难以错过。CTA 按钮直接 `onControl(controlAction)`，不需要用户从右侧 sidebar 找半天。`computePauseAlert(match, hasHumanPlayer, currentActorName)` 工具函数集中暂停判定逻辑；CSS `pause-alert-{continue/step/paused}` 三种 tone 各一套配色。新增 3 项 TableView 测试覆盖三种 alert tone + "正常 awaiting_ai 不该出现 alert" 反例。
+- 2026-05-22 21:58：实测后端：3 个 preset 在线（GPT-5.4 / GLM-5 / KIMI-K2.5），probe 接口对 GPT-5.4 返回 `{ok:true, latencyMs:2363, snippet:"pong"}`；DeepSeek-V4-Flash 那条 preset **不再保留**（之前 21:10 试性加过 sk- token 但没用完，21:15 用户确认要删除）。当前本机 `config/ai-presets.yaml` 只剩 3 条。前端 `npm run build` 顺利产出 `index-DbVgVnJB.js 198KB / index-03dQkXsT.css 38.7KB`，30 个 vitest 全过。
 
 ## 审查

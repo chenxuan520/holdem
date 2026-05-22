@@ -26,6 +26,34 @@
 - 前端测试：`cd frontend && npm run test`
 - 前端构建：`cd frontend && npm run build`
 
+## 维护本机 AI token（SSO `at-` token 过期时）
+
+本机 `config/ai-presets.yaml` 里走 llmbox 的 preset（GPT-5.4 / GLM-5 / KIMI-K2.5
+都是同一份）使用的是 `token: at-...` 形式的 SSO 短期 token，会过期，过期时
+最直接的表现是 lobby「一键检测 AI」按钮报 `http 401` / `http 403`，或对局开
+始后 AI 立刻全部走"请求出错自动 fold"。**这种时候要刷 token，不是改代码。**
+
+- 刷新工具：`~/.local/bin/holdem-sniff-ttadk-token`
+  - **故意不在仓库里**：避免 token-handling 脚本进入版本控制；放在 `$PATH`
+    内的 `~/.local/bin`，全局可用。
+- 常用用法：
+  - 只看 apiKey + 当前 llmbox 上的模型列表（不动 yaml）：
+    - `holdem-sniff-ttadk-token`
+    - `holdem-sniff-ttadk-token glm-5 kimi-k2.5`
+  - **原地刷新本机 yaml 的 `at-` token（最常用）**：
+    - `holdem-sniff-ttadk-token --apply config/ai-presets.yaml`
+    - 正则只匹配 `^\s*token:\s*at-\S+$`，**不会**碰 `sk-` 长期 token /
+      endpoint / model / name 等其它字段，所以重复跑安全。
+- 工作机制（避免下次又忘）：
+  - `ttadk opencode -m <model>` 启动 `opencode` 时会注入 `OPENCODE_CONFIG_CONTENT`
+    环境变量，里面是这次 provider 的解析后 JSON（含 apiKey / baseURL / models）。
+  - 脚本用 `mktemp -d` 建临时目录，放一个名叫 `opencode` 的 bash shim，shim
+    把 env 写出后立即 `exit 0`，TUI 完全不启动。
+  - `trap 'rm -rf "$tmp"'` 退出清空临时目录，磁盘不留 token。
+  - python `JSONDecoder().raw_decode()` 容忍 ttadk 注入 JSON 尾部多出来的 `}`。
+- **绝对不要**把 sniff 出来的 apiKey / `at-` token 贴到 commit message、PR 描
+  述、agent log、replay JSON 里——这些 token 仍是有效凭证。
+
 ## 实现留痕
 
 - 计划文档在 `.agents/plans/2026-05-21-holdem-ai-battle.md`

@@ -1,7 +1,10 @@
-import type { Preset, PresetProbeStatus } from '../lib/types'
+import { useState } from 'react'
+import { CustomPresetForm } from '../components/CustomPresetForm'
+import type { CustomPresetEntry, Preset, PresetProbeStatus } from '../lib/types'
 
 type Props = {
   presets: Preset[]
+  customPresets?: CustomPresetEntry[]
   selectedAI: string[]
   aiPlayerNames: string[]
   humanName: string
@@ -27,10 +30,13 @@ type Props = {
   onRemoveSeat: (index: number) => void
   onCreate: () => void
   onProbeAll?: () => void
+  onSaveCustomPreset?: (entry: CustomPresetEntry) => void
+  onDeleteCustomPreset?: (id: string) => void
 }
 
 export function LobbyView({
   presets,
+  customPresets = [],
   selectedAI,
   aiPlayerNames,
   humanName,
@@ -56,14 +62,44 @@ export function LobbyView({
   onRemoveSeat,
   onCreate,
   onProbeAll,
+  onSaveCustomPreset,
+  onDeleteCustomPreset,
 }: Props) {
+  // Custom presets live entirely client-side. The lobby shows them inline
+  // alongside backend-loaded presets in seat dropdowns and as preset cards;
+  // the form below the lobby toggles in/out for create + edit + delete.
+  const [customFormState, setCustomFormState] = useState<
+    | { kind: 'closed' }
+    | { kind: 'create' }
+    | { kind: 'edit'; entry: CustomPresetEntry }
+  >({ kind: 'closed' })
+
   const minAI = spectatorMode ? 2 : 1
   const maxAI = spectatorMode ? 6 : 5
   const totalPlayers = selectedAI.length + (spectatorMode ? 0 : 1)
-  const canCreate = !loading && presets.length > 0 && selectedAI.length >= minAI && selectedAI.length <= maxAI && bigBlind >= smallBlind
+  // Combined preset catalog: backend-loaded first, custom (browser-only) after.
+  // Used both for the seat dropdowns and the right-side preset card grid.
+  const combinedPresets: Preset[] = [
+    ...presets,
+    ...customPresets.map<Preset>((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      endpoint: entry.endpoint,
+      model: entry.model,
+      systemPrompt: entry.systemPrompt ?? '',
+      structuredOutput: entry.structuredOutput,
+    })),
+  ]
+  const canCreate =
+    !loading &&
+    combinedPresets.length > 0 &&
+    selectedAI.length >= minAI &&
+    selectedAI.length <= maxAI &&
+    bigBlind >= smallBlind
   const uniquePresetIds = Array.from(new Set(selectedAI))
   const canProbe = !probing && !loading && uniquePresetIds.length > 0
   const probeSummary = summarizeProbeStatuses(uniquePresetIds, probeStatuses)
+  const isCustomPresetId = (id: string) => id.startsWith('custom-')
 
   return (
     <>
@@ -103,7 +139,11 @@ export function LobbyView({
               <h2>建桌设置</h2>
               <p>{spectatorMode ? '纯 AI 观战模式：2~6 个 AI 自动对打。' : '1 名真人 + 1~5 个 AI，可重复选择同一预设 AI。'} </p>
             </div>
-            <button className="ghost-button" onClick={onAddSeat} disabled={selectedAI.length >= maxAI || presets.length === 0}>
+            <button
+              className="ghost-button"
+              onClick={onAddSeat}
+              disabled={selectedAI.length >= maxAI || combinedPresets.length === 0}
+            >
               + 添加 AI
             </button>
           </div>
@@ -176,11 +216,24 @@ export function LobbyView({
                   />
 
                   <select value={presetID} onChange={(e) => onUpdatePreset(index, e.target.value)}>
-                    {presets.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.name} · {preset.model}
-                      </option>
-                    ))}
+                    {presets.length > 0 ? (
+                      <optgroup label="服务端预设">
+                        {presets.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.name} · {preset.model}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                    {customPresets.length > 0 ? (
+                      <optgroup label="自定义模型（仅本机）">
+                        {customPresets.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.name} · {preset.model}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
                   </select>
                 </div>
 
@@ -220,21 +273,28 @@ export function LobbyView({
             <div className="panel-header compact">
               <div>
                 <h2>AI 预设</h2>
-                <p>从服务端设置文件读取，浏览器端不会拿到 token。</p>
+                <p>
+                  服务端预设来自 yaml 配置；自定义模型只保存在你这台浏览器。
+                </p>
               </div>
-              <span className="status-pill">{loading ? '加载中' : `${presets.length} 个可用`}</span>
+              <span className="status-pill">
+                {loading ? '加载中' : `${presets.length} 内置 / ${customPresets.length} 自定义`}
+              </span>
             </div>
 
             <div className="preset-grid">
               {selectedAI
-                .map((id) => presets.find((preset) => preset.id === id))
+                .map((id) => combinedPresets.find((preset) => preset.id === id))
                 .filter(Boolean)
                 .map((preset, index) => {
                   const status = probeStatuses[preset!.id] ?? { state: 'idle' as const }
+                  const isCustom = isCustomPresetId(preset!.id)
+                  const customEntry = isCustom ? customPresets.find((entry) => entry.id === preset!.id) : null
                   return (
-                    <article className="preset-card" key={`${preset!.id}-${index}`}>
+                    <article className={`preset-card ${isCustom ? 'preset-card-custom' : ''}`} key={`${preset!.id}-${index}`}>
                       <div className="preset-card-head">
                         <span className="badge">AI #{index + 1}</span>
+                        {isCustom ? <span className="badge accent">自定义</span> : null}
                         <ProbeBadge status={status} />
                       </div>
                       <h3>{preset!.name}</h3>
@@ -246,10 +306,79 @@ export function LobbyView({
                       ) : preset!.systemPrompt ? (
                         <small>{preset!.systemPrompt}</small>
                       ) : null}
+                      {isCustom && customEntry && onSaveCustomPreset ? (
+                        <button
+                          type="button"
+                          className="ghost-button compact preset-card-edit"
+                          onClick={() => setCustomFormState({ kind: 'edit', entry: customEntry })}
+                        >
+                          编辑
+                        </button>
+                      ) : null}
                     </article>
                   )
                 })}
             </div>
+          </section>
+
+          <section className="card panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>自定义模型</h2>
+                <p>添加自己的 endpoint / token / model；只在这台浏览器里保存。</p>
+              </div>
+              {customFormState.kind === 'closed' ? (
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => setCustomFormState({ kind: 'create' })}
+                  data-testid="custom-preset-add"
+                >
+                  + 添加自定义模型
+                </button>
+              ) : null}
+            </div>
+
+            {customPresets.length > 0 ? (
+              <ul className="custom-preset-list">
+                {customPresets.map((entry) => (
+                  <li key={entry.id} className="custom-preset-list-item">
+                    <div>
+                      <strong>{entry.name}</strong>
+                      <small>{entry.model} · {entry.endpoint}</small>
+                    </div>
+                    <button
+                      type="button"
+                      className="ghost-button compact"
+                      onClick={() => setCustomFormState({ kind: 'edit', entry })}
+                    >
+                      编辑
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted-text">暂无自定义模型。点击右上「+ 添加自定义模型」可以加一组 endpoint/token/model。</p>
+            )}
+
+            {customFormState.kind !== 'closed' && onSaveCustomPreset ? (
+              <CustomPresetForm
+                initial={customFormState.kind === 'edit' ? customFormState.entry : null}
+                onSubmit={(entry) => {
+                  onSaveCustomPreset(entry)
+                  setCustomFormState({ kind: 'closed' })
+                }}
+                onCancel={() => setCustomFormState({ kind: 'closed' })}
+                onDelete={
+                  onDeleteCustomPreset
+                    ? (id) => {
+                        onDeleteCustomPreset(id)
+                        setCustomFormState({ kind: 'closed' })
+                      }
+                    : undefined
+                }
+              />
+            ) : null}
           </section>
 
           <section className="card panel compact-info">

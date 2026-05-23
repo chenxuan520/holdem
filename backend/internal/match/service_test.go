@@ -6,6 +6,7 @@ import (
 	backendai "holdem/backend/internal/ai"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -306,6 +307,110 @@ func TestRepeatedAIFailuresFallbackToFold(t *testing.T) {
 	}
 	if !aiFolded {
 		t.Fatalf("expected AI player to be marked folded in current hand")
+	}
+}
+
+// TestCreateMatchRegistersInlinePreset locks in the contract for the
+// lobby's "自定义模型" path: the user-typed preset arrives via
+// AIInlinePresets, the @inline:N marker in AIPresetIDs gets rewritten to
+// the generated `inline-*` id, and from there the AI seat behaves like
+// any built-in preset (visible in s.presets, players[].PresetID points at
+// it). The inline token is NOT supposed to be reachable via /api/presets
+// public listing — that's enforced separately by the httpapi server which
+// only iterates the build-time presets slice.
+func TestCreateMatchRegistersInlinePreset(t *testing.T) {
+	service := NewService([]config.Preset{
+		{ID: "ai-1", Name: "Built-in", Endpoint: "https://api.openai.com/v1", Token: "replace-with-your-token", Model: "gpt-4.1-mini", SystemPrompt: ""},
+	}, nil)
+
+	snapshot, err := service.CreateMatch(CreateRequest{
+		InitialChips: 100,
+		SmallBlind:   5,
+		BigBlind:     10,
+		// One built-in seat + one inline. Order preserved.
+		AIPresetIDs: []string{"ai-1", "@inline:0"},
+		AIInlinePresets: []config.InlinePresetInput{
+			{
+				Name:             "My Custom",
+				Endpoint:         "https://api.example.com/v1",
+				Token:            "sk-test-1234",
+				Model:            "custom-model-1",
+				StructuredOutput: "json_object",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateMatch returned error: %v", err)
+	}
+
+	if len(snapshot.Players) < 3 {
+		t.Fatalf("expected hero + 2 AI seats, got %d players", len(snapshot.Players))
+	}
+	aiSeats := snapshot.Players[1:]
+	if aiSeats[0].PresetID != "ai-1" {
+		t.Fatalf("expected first AI seat to keep built-in id ai-1, got %q", aiSeats[0].PresetID)
+	}
+	if !strings.HasPrefix(aiSeats[1].PresetID, "inline-") {
+		t.Fatalf("expected inline AI seat preset id to start with inline-, got %q", aiSeats[1].PresetID)
+	}
+
+	// The inline preset must be registered in s.presets so the AI flow
+	// can look it up by id (otherwise the model would never get called).
+	service.mu.RLock()
+	registered, ok := service.presets[aiSeats[1].PresetID]
+	service.mu.RUnlock()
+	if !ok {
+		t.Fatalf("expected inline preset to be registered in service.presets")
+	}
+	if registered.Token != "sk-test-1234" {
+		t.Fatalf("expected inline preset token to round-trip into the service map; got %q", registered.Token)
+	}
+	if registered.StructuredOutput != "json_object" {
+		t.Fatalf("expected inline preset structured_output to be canonicalised to json_object; got %q", registered.StructuredOutput)
+	}
+}
+
+// TestCreateMatchRejectsInlineMarkerWithoutPayload makes sure a stray
+// "@inline:N" reference with no AIInlinePresets supplied surfaces a clear
+// error rather than a confusing "unknown preset id" downstream.
+func TestCreateMatchRejectsInlineMarkerWithoutPayload(t *testing.T) {
+	service := NewService([]config.Preset{
+		{ID: "ai-1", Name: "Built-in", Endpoint: "https://api.openai.com/v1", Token: "replace-with-your-token", Model: "gpt-4.1-mini", SystemPrompt: ""},
+	}, nil)
+	_, err := service.CreateMatch(CreateRequest{
+		InitialChips: 100,
+		SmallBlind:   5,
+		BigBlind:     10,
+		AIPresetIDs:  []string{"@inline:0"},
+	})
+	if err == nil {
+		t.Fatalf("expected error when @inline marker references missing AIInlinePresets")
+	}
+	if !strings.Contains(err.Error(), "@inline") {
+		t.Fatalf("expected error to mention the @inline marker; got %v", err)
+	}
+}
+
+// TestCreateMatchRejectsMalformedInlinePreset confirms validation runs on
+// each inline preset (PrepareInlinePreset) — missing endpoint / token /
+// model should bounce back as 400 rather than silently registering an
+// incomplete preset that would later fail at AI-call time.
+func TestCreateMatchRejectsMalformedInlinePreset(t *testing.T) {
+	service := NewService(nil, nil)
+	_, err := service.CreateMatch(CreateRequest{
+		InitialChips: 100,
+		SmallBlind:   5,
+		BigBlind:     10,
+		AIPresetIDs:  []string{"@inline:0"},
+		AIInlinePresets: []config.InlinePresetInput{
+			{Name: "Broken", Endpoint: "", Token: "x", Model: "y"},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected error for inline preset missing endpoint")
+	}
+	if !strings.Contains(err.Error(), "endpoint") {
+		t.Fatalf("expected error to mention missing endpoint; got %v", err)
 	}
 }
 

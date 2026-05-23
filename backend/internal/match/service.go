@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,15 +16,32 @@ import (
 )
 
 type CreateRequest struct {
-	InitialChips  int      `json:"initialChips"`
-	SmallBlind    int      `json:"smallBlind"`
-	BigBlind      int      `json:"bigBlind"`
-	AIPresetIDs   []string `json:"aiPresetIds"`
-	AIPlayerNames []string `json:"aiPlayerNames,omitempty"`
-	HumanName     string   `json:"humanName,omitempty"`
-	SpectatorMode bool     `json:"spectatorMode"`
-	SemiAutoMode  bool     `json:"semiAutoMode"`
-	ManualMode    bool     `json:"manualMode"`
+	InitialChips int `json:"initialChips"`
+	SmallBlind   int `json:"smallBlind"`
+	BigBlind     int `json:"bigBlind"`
+	// AIPresetIDs lists AI seats in order. Each entry is either:
+	//   - an id from `/api/presets` (built-in, loaded from
+	//     config/ai-presets.yaml at startup), or
+	//   - the marker "@inline:N" referencing AIInlinePresets[N], which
+	//     is registered as an ephemeral per-match preset on CreateMatch.
+	AIPresetIDs []string `json:"aiPresetIds"`
+	// AIInlinePresets is the body of any `@inline:N` markers referenced
+	// from AIPresetIDs. Tokens land here straight from the user's
+	// browser; they do NOT get persisted to disk and aren't visible via
+	// `/api/presets`. Each one gets a generated `inline-<id>` so AI flow
+	// can look them up the same way as built-in presets during the
+	// match's lifetime.
+	//
+	// We use config.InlinePresetInput here (not config.Preset) because
+	// the latter has Token sealed under `json:"-"` to prevent any
+	// outbound leak; the input variant is the explicit, audited entry
+	// point for tokens coming in from the network.
+	AIInlinePresets []config.InlinePresetInput `json:"aiInlinePresets,omitempty"`
+	AIPlayerNames   []string        `json:"aiPlayerNames,omitempty"`
+	HumanName       string          `json:"humanName,omitempty"`
+	SpectatorMode   bool            `json:"spectatorMode"`
+	SemiAutoMode    bool            `json:"semiAutoMode"`
+	ManualMode      bool            `json:"manualMode"`
 }
 
 type Snapshot struct {
@@ -200,6 +218,13 @@ func (s *Service) CreateMatch(req CreateRequest) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 
+	// Resolve any "@inline:N" markers in AIPresetIDs into real preset
+	// IDs registered in s.presets. Mutates req in-place; returns an
+	// error if any inline preset is malformed.
+	if err := s.registerInlinePresets(&req); err != nil {
+		return Snapshot{}, err
+	}
+
 	players, err := s.buildPlayers(req)
 	if err != nil {
 		return Snapshot{}, err
@@ -296,6 +321,82 @@ func (s *Service) ProbePreset(ctx context.Context, id string) (ai.ProbeResult, b
 		return ai.ProbeResult{OK: false, Error: "unknown preset id"}, false
 	}
 	return s.ai.Probe(ctx, preset), true
+}
+
+// ProbeInlinePreset checks an arbitrary endpoint/token/model combination
+// the user typed into the lobby's "自定义模型" form, without registering
+// the preset for matches. The token never lands in s.presets and never
+// touches the SQLite store; this call is purely a connectivity test.
+func (s *Service) ProbeInlinePreset(ctx context.Context, input config.InlinePresetInput) ai.ProbeResult {
+	prepared, err := config.PrepareInlinePreset(input.ToPreset())
+	if err != nil {
+		return ai.ProbeResult{OK: false, Error: err.Error()}
+	}
+	if prepared.ID == "" {
+		// Probe doesn't actually use the ID, but having a stable
+		// non-empty value keeps logs readable if we ever start logging
+		// probe attempts.
+		prepared.ID = "inline-probe"
+	}
+	return s.ai.Probe(ctx, prepared)
+}
+
+// registerInlinePresets validates each preset supplied inline, generates
+// an ephemeral `inline-<random>` id for it, registers it in s.presets so
+// the rest of the match flow can look it up by id, and rewrites any
+// `@inline:N` markers in req.AIPresetIDs to point at the generated ids.
+// The lock is held for the duration so concurrent CreateMatch calls
+// don't race on s.presets.
+func (s *Service) registerInlinePresets(req *CreateRequest) error {
+	if req == nil || len(req.AIInlinePresets) == 0 {
+		// Even with no inline presets, refuse stray @inline markers so
+		// the caller gets a clear error rather than "unknown preset".
+		for _, ref := range req.AIPresetIDs {
+			if strings.HasPrefix(ref, "@inline:") {
+				return fmt.Errorf("aiPresetIds references %q but aiInlinePresets is empty", ref)
+			}
+		}
+		return nil
+	}
+
+	prepared := make([]config.Preset, len(req.AIInlinePresets))
+	for i, raw := range req.AIInlinePresets {
+		ready, err := config.PrepareInlinePreset(raw.ToPreset())
+		if err != nil {
+			return fmt.Errorf("inline preset %d: %w", i+1, err)
+		}
+		// Always overwrite any client-supplied id so user-supplied
+		// values can't collide with built-in preset ids or with each
+		// other.
+		suffix, err := newID()
+		if err != nil {
+			return fmt.Errorf("generate inline preset id: %w", err)
+		}
+		ready.ID = "inline-" + suffix
+		prepared[i] = ready
+	}
+
+	s.mu.Lock()
+	for _, preset := range prepared {
+		s.presets[preset.ID] = preset
+	}
+	s.mu.Unlock()
+
+	for i, ref := range req.AIPresetIDs {
+		if !strings.HasPrefix(ref, "@inline:") {
+			continue
+		}
+		idxStr := strings.TrimPrefix(ref, "@inline:")
+		idx, err := strconv.Atoi(idxStr)
+		if err != nil {
+			return fmt.Errorf("invalid inline reference %q (expected @inline:N)", ref)
+		}
+		if idx < 0 || idx >= len(prepared) {
+			return fmt.Errorf("inline reference %q out of range (have %d inline presets)", ref, len(prepared))
+		}
+		req.AIPresetIDs[i] = prepared[idx].ID
+	}
+	return nil
 }
 
 func (s *Service) ListRecords() []RecordSummary {

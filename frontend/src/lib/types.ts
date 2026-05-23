@@ -117,11 +117,37 @@ export type MatchSnapshot = {
   lastEvent?: StreamEvent
 }
 
+// InlinePresetConfig is what the user types into the "自定义模型" form on
+// the lobby. It's the same shape as `Preset` minus the synthetic `id`,
+// which the frontend generates locally (`custom-<uuid>`) so the user can
+// keep multiple custom configs at once.
+export type InlinePresetConfig = {
+  name: string
+  endpoint: string
+  token: string
+  model: string
+  systemPrompt?: string
+  structuredOutput?: StructuredOutputMode
+}
+
+// CustomPresetEntry pairs a frontend-only id with the user-typed config so
+// we can refer to it by id from the lobby UI without sending the token to
+// the backend until match-start / probe time.
+export type CustomPresetEntry = InlinePresetConfig & {
+  id: string
+}
+
 export type CreateMatchPayload = {
   initialChips: number
   smallBlind: number
   bigBlind: number
+  // aiPresetIds entries can be either:
+  //   - a built-in preset id from `/api/presets` (e.g. "gpt-5-4"), or
+  //   - the special marker "@inline:N" which references aiInlinePresets[N]
+  //     and tells the backend to register that ad-hoc preset for this
+  //     match only.
   aiPresetIds: string[]
+  aiInlinePresets?: InlinePresetConfig[]
   aiPlayerNames?: string[]
   humanName?: string
   spectatorMode?: boolean

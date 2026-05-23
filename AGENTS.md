@@ -26,6 +26,54 @@
 - 前端测试：`cd frontend && npm run test`
 - 前端构建：`cd frontend && npm run build`
 
+## 访问控制（前端密码保护）
+
+后端默认**没有**密码保护，本地 dev 直接打开即可。但如果你把这台机器暴露给局
+域网/反代/隧道，**任何能 reach 18130 的人都可以用你的 AI token 跑对局**——
+启用密码保护是必须的。
+
+- **打开方式（最常用）**：启动后端时设置 `HOLDEM_AUTH_PASSWORD` 环境变量。
+  - 例：`HOLDEM_AUTH_PASSWORD=letmein cd backend && go run ./cmd/server`
+  - **不要**改 `config/app.json` 的 `auth.password` 字段——那个文件被 git 跟
+    踪，把真实密码写进去就会泄露到仓库。env var 优先级更高，专门给本机使用。
+- **行为**：
+  - `auth.password` 空 = 启动日志显示 `(auth: disabled)`，所有 `/api/*`
+    都开放。
+  - `auth.password` 非空 = 启动日志显示 `(auth: enabled)`，`/api/*` 全部要求
+    `X-Holdem-Password: <password>` header；SSE 因为 EventSource 不能自定义
+    header，额外接受 `?token=<password>` query。401 失败带 `WWW-Authenticate`
+    头。
+  - 前端进入时会先打 `/api/auth/check`，401 就出登录表单，输入正确密码后写
+    localStorage 并放行；右上角「退出」按钮会清掉 localStorage 重新锁。
+- **任何后续 401 都会自动踢回登录页**：lib/api.ts 里的 `authedFetch` 拦了
+  401，dispatch `holdem:auth-required` 事件，AuthGate 监听后立刻切回登录态。
+  所以密码改了 / token 失效 / 服务器换了密码，前端不会卡死。
+- **不要**把刚 sniff 出来的 SSO `at-` token 当 `HOLDEM_AUTH_PASSWORD` 的值
+  ——访问密码是你自己定的、用来挡门的；`at-` token 是上游 LLM 的凭证，两件
+  事完全分开。
+
+## 自定义 AI 模型（前端 lobby「自定义模型」按钮）
+
+除了从 `config/ai-presets.yaml` 加载的内置 preset，前端 lobby 现在也可以加
+任意 endpoint/token/model 组合：
+
+- 入口：lobby 右下「自定义模型」面板的「+ 添加自定义模型」按钮。
+- 字段：显示名称 / endpoint / token / model / 结构化输出（tool_call 默认；
+  GLM/Kimi 用 json_object；其它用 none）/ 可选 system prompt。
+- 表单里有「检测连通性」按钮，会调 `POST /api/presets/probe-inline`，token
+  随请求体发后端做最小 chat completion，**不**写入 SQLite。
+- 保存：写入 browser localStorage（`holdem.customPresets.v1`）；token 一直
+  只在你这台浏览器里。点击 lobby 右上「退出」时不会清掉它（那只清密码）；
+  要彻底删需要在该自定义模型上点「删除」或浏览器清缓存。
+- 开局：建桌时前端把 `custom-*` id 转成 `@inline:N` 标记，并把对应 config
+  作为 `aiInlinePresets[N]` 一起发给后端。后端 `Service.registerInlinePresets`
+  validate + 生成 `inline-<random>` ephemeral id 注册到 `s.presets`，玩法同
+  built-in preset。
+- **重启后端会丢**：inline preset 在内存 `s.presets` 里、不写盘；如果一桌正
+  好用着 inline preset，重启后那桌会因为找不到 preset id 报错。建议：长时间
+  跑的对局优先用 yaml 内置 preset；要把 inline 提升成长期使用，就把它复制
+  到本机 `config/ai-presets.yaml`。
+
 ## 维护本机 AI token（SSO `at-` token 过期时）
 
 本机 `config/ai-presets.yaml` 里走 llmbox 的 preset（GPT-5.4 / GLM-5 / KIMI-K2.5

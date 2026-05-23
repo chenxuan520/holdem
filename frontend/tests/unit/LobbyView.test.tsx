@@ -120,4 +120,77 @@ describe('LobbyView', () => {
     expect(button).toBeDisabled()
     expect(button).toHaveTextContent('检测中')
   })
+
+  it('renders custom presets in the seat dropdown alongside built-in ones', () => {
+    const { container } = renderLobby({
+      customPresets: [
+        {
+          id: 'custom-1',
+          name: 'My GLM',
+          endpoint: 'https://example.com/v1',
+          token: 'sk-test',
+          model: 'glm-test',
+          structuredOutput: 'json_object',
+        },
+      ],
+    })
+
+    // Both optgroups appear (label is an attribute on <optgroup>, not text).
+    expect(container.querySelector('optgroup[label="服务端预设"]')).not.toBeNull()
+    expect(container.querySelector('optgroup[label="自定义模型（仅本机）"]')).not.toBeNull()
+    // The custom option is selectable.
+    const option = screen.getByRole('option', { name: /My GLM · glm-test/ })
+    expect(option).toBeInTheDocument()
+  })
+
+  it('opens the custom preset form and forwards the saved entry', async () => {
+    const onSaveCustomPreset = vi.fn()
+    renderLobby({ onSaveCustomPreset })
+
+    await userEvent.click(screen.getByTestId('custom-preset-add'))
+    expect(screen.getByText('添加自定义模型')).toBeInTheDocument()
+
+    await userEvent.type(screen.getByPlaceholderText('例如：我的 Claude Sonnet'), 'My Test Model')
+    await userEvent.type(screen.getByPlaceholderText('https://api.example.com/v1'), 'https://api.example.com/v1')
+    await userEvent.type(screen.getByPlaceholderText('sk-... / at-...'), 'sk-token-xyz')
+    await userEvent.type(screen.getByPlaceholderText('例如：gpt-5.4 / glm-5 / claude-sonnet-4'), 'test-model')
+
+    await userEvent.click(screen.getByRole('button', { name: '添加' }))
+
+    expect(onSaveCustomPreset).toHaveBeenCalledTimes(1)
+    const saved = onSaveCustomPreset.mock.calls[0][0]
+    expect(saved.id).toMatch(/^custom-/)
+    expect(saved.name).toBe('My Test Model')
+    expect(saved.endpoint).toBe('https://api.example.com/v1')
+    expect(saved.token).toBe('sk-token-xyz')
+    expect(saved.model).toBe('test-model')
+    expect(saved.structuredOutput).toBe('tool_call')
+  })
+
+  it('exposes existing custom presets in the management list', () => {
+    renderLobby({
+      customPresets: [
+        {
+          id: 'custom-1',
+          name: 'My GLM',
+          endpoint: 'https://example.com/v1',
+          token: 'sk-test',
+          model: 'glm-test',
+        },
+        {
+          id: 'custom-2',
+          name: 'My Kimi',
+          endpoint: 'https://example.com/v1',
+          token: 'sk-test',
+          model: 'kimi-test',
+        },
+      ],
+    })
+
+    expect(screen.getByText('My GLM')).toBeInTheDocument()
+    expect(screen.getByText('My Kimi')).toBeInTheDocument()
+    // Both have edit affordance available.
+    const editButtons = screen.getAllByRole('button', { name: '编辑' })
+    expect(editButtons.length).toBeGreaterThanOrEqual(2)
+  })
 })

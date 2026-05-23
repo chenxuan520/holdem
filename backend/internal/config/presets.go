@@ -119,6 +119,67 @@ func normalizeStructuredOutput(value string) (string, error) {
 	}
 }
 
+// InlinePresetInput is the JSON shape callers POST when supplying a
+// preset inline (lobby's "自定义模型" form). It mirrors Preset but
+// deliberately keeps Token in the JSON tag so the field actually arrives
+// — Preset.Token is locked to `json:"-"` so a stray response with a
+// Preset value can never leak credentials, and this input type is the
+// only opt-in path for inbound tokens.
+type InlinePresetInput struct {
+	Name             string `json:"name"`
+	Endpoint         string `json:"endpoint"`
+	Token            string `json:"token"`
+	Model            string `json:"model"`
+	SystemPrompt     string `json:"systemPrompt"`
+	StructuredOutput string `json:"structuredOutput"`
+}
+
+// ToPreset converts the inbound input into the internal Preset shape;
+// callers should run PrepareInlinePreset right after to validate +
+// canonicalise structured output before using it.
+func (in InlinePresetInput) ToPreset() Preset {
+	return Preset{
+		Name:             in.Name,
+		Endpoint:         in.Endpoint,
+		Token:            in.Token,
+		Model:            in.Model,
+		SystemPrompt:     in.SystemPrompt,
+		StructuredOutput: in.StructuredOutput,
+	}
+}
+
+// PrepareInlinePreset normalises and validates a Preset that was supplied
+// at request time (e.g. from the lobby's "自定义模型" form) instead of
+// loaded from the YAML file. It returns the canonicalised preset on
+// success; on error the caller should reject the request. ID is NOT set
+// here — match.Service.CreateMatch generates an ephemeral inline-* id so
+// it can't collide with built-in presets.
+func PrepareInlinePreset(preset Preset) (Preset, error) {
+	preset.Name = strings.TrimSpace(preset.Name)
+	preset.Endpoint = strings.TrimSpace(preset.Endpoint)
+	preset.Token = strings.TrimSpace(preset.Token)
+	preset.Model = strings.TrimSpace(preset.Model)
+	preset.SystemPrompt = strings.TrimSpace(preset.SystemPrompt)
+	normalized, err := normalizeStructuredOutput(preset.StructuredOutput)
+	if err != nil {
+		return Preset{}, err
+	}
+	preset.StructuredOutput = normalized
+	if preset.Name == "" {
+		return Preset{}, fmt.Errorf("missing name")
+	}
+	if preset.Endpoint == "" {
+		return Preset{}, fmt.Errorf("missing endpoint")
+	}
+	if preset.Token == "" {
+		return Preset{}, fmt.Errorf("missing token")
+	}
+	if preset.Model == "" {
+		return Preset{}, fmt.Errorf("missing model")
+	}
+	return preset, nil
+}
+
 func (p Preset) validate() error {
 	// system_prompt is intentionally optional: the AI client ships a complete
 	// NLHE decision framework + output contract by itself, and benchmark

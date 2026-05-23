@@ -8,5 +8,8 @@
     "host": "127.0.0.1",
     "port": 5173,
     "apiTarget": "http://127.0.0.1:18130"
+  },
+  "auth": {
+    "password": ""
   }
 }

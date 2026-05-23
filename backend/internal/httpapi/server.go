@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,21 +13,35 @@ import (
 	"holdem/backend/internal/match"
 )
 
-type Server struct {
-	presets []config.Preset
-	matches *match.Service
+// subtleConstantTimeEq compares two strings in constant time so a password
+// check can't be sped up by a timing-side-channel attacker tweaking bytes.
+// This is overkill for a LAN-only tool but free.
+func subtleConstantTimeEq(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-func NewServer(presets []config.Preset, replayStore match.ReplayStore) *Server {
+type Server struct {
+	presets      []config.Preset
+	matches      *match.Service
+	authPassword string
+}
+
+func NewServer(presets []config.Preset, replayStore match.ReplayStore, authPassword string) *Server {
 	return &Server{
-		presets: presets,
-		matches: match.NewService(presets, replayStore),
+		presets:      presets,
+		matches:      match.NewService(presets, replayStore),
+		authPassword: authPassword,
 	}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	// Public auth-status check: callers use this to decide whether they
+	// need to prompt for a password and to verify a stored one. Always
+	// reachable; itself uses checkAuth() to report the verdict.
+	mux.HandleFunc("/api/auth/check", s.handleAuthCheck)
 	mux.HandleFunc("/api/presets", s.handlePresets)
+	mux.HandleFunc("/api/presets/probe-inline", s.handlePresetProbeInline)
 	mux.HandleFunc("/api/presets/", s.handlePresetByID)
 	mux.HandleFunc("/api/matches", s.handleMatches)
 	mux.HandleFunc("/api/matches/", s.handleMatchByID)
@@ -35,7 +50,72 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/replays", s.handleReplays)
 	mux.HandleFunc("/api/replays/", s.handleReplayByID)
 
-	return withCORS(mux)
+	return withCORS(s.withAuth(mux))
+}
+
+// withAuth gates every /api/* route behind the configured shared password.
+// /api/auth/check is allowed through with whatever the client sent so it
+// can report the verdict; everything else 401s on missing / wrong password.
+// Empty server password means auth is disabled and the wrapper is a no-op,
+// matching the local-dev default.
+func (s *Server) withAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if s.authPassword == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// /api/auth/check itself reports the verdict — let it handle
+		// the missing/wrong-password case in its own response shape.
+		if r.URL.Path == "/api/auth/check" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !s.checkAuth(r) {
+			w.Header().Set("WWW-Authenticate", "Holdem realm=\"holdem-api\"")
+			writeError(w, http.StatusUnauthorized, "auth required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// checkAuth returns true iff the request carries a password matching the
+// server's configured one. Header takes precedence; the query param fallback
+// exists only because the browser EventSource API can't set custom headers
+// on the SSE stream. When the server has no password configured, every
+// request is treated as authorised.
+func (s *Server) checkAuth(r *http.Request) bool {
+	if s.authPassword == "" {
+		return true
+	}
+	if got := strings.TrimSpace(r.Header.Get("X-Holdem-Password")); got != "" {
+		return subtleConstantTimeEq(got, s.authPassword)
+	}
+	if got := strings.TrimSpace(r.URL.Query().Get("token")); got != "" {
+		return subtleConstantTimeEq(got, s.authPassword)
+	}
+	return false
+}
+
+func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+	if s.authPassword == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"authRequired": false, "ok": true})
+		return
+	}
+	if !s.checkAuth(r) {
+		w.Header().Set("WWW-Authenticate", "Holdem realm=\"holdem-api\"")
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"authRequired": true, "ok": false, "error": "auth required"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"authRequired": true, "ok": true})
 }
 
 func (s *Server) handlePresets(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +130,38 @@ func (s *Server) handlePresets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"presets": public})
+}
+
+// handlePresetProbeInline accepts a full preset config in the request
+// body and runs a connectivity probe against it without registering the
+// preset for any match. Used by the lobby's "自定义模型" form so the user
+// can verify their endpoint/token/model before committing to a match.
+// The token is processed in-memory only and never persisted.
+func (s *Server) handlePresetProbeInline(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w, http.MethodPost)
+		return
+	}
+	var input config.InlinePresetInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid json: %v", err))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	result := s.matches.ProbeInlinePreset(ctx, input)
+	status := http.StatusOK
+	if !result.OK {
+		// If the probe failed because the user-supplied config didn't
+		// validate (missing fields), 400 is more accurate than 502;
+		// otherwise treat it as upstream gateway error.
+		if strings.HasPrefix(strings.TrimSpace(result.Error), "missing ") || strings.HasPrefix(strings.TrimSpace(result.Error), "invalid ") {
+			status = http.StatusBadRequest
+		} else {
+			status = http.StatusBadGateway
+		}
+	}
+	writeJSON(w, status, result)
 }
 
 func (s *Server) handlePresetByID(w http.ResponseWriter, r *http.Request) {
@@ -342,7 +454,7 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Holdem-Password")
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
 
 		if r.Method == http.MethodOptions {

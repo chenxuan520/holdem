@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 
 	"holdem/backend/internal/config"
@@ -30,10 +31,23 @@ func main() {
 		log.Fatalf("open replay store: %v", err)
 	}
 
-	server := httpapi.NewServer(presets, replayStore)
+	// HOLDEM_AUTH_PASSWORD wins over the value in app.json. The repo-tracked
+	// app.json defaults to empty, so committing accidentally never leaks a
+	// real password; the env var is the recommended way to enable auth on
+	// a personal machine without touching tracked files.
+	authPassword := runtimeConfig.Auth.Password
+	if env := os.Getenv("HOLDEM_AUTH_PASSWORD"); env != "" {
+		authPassword = env
+	}
+
+	server := httpapi.NewServer(presets, replayStore, authPassword)
 	addr := fmt.Sprintf(":%d", runtimeConfig.Backend.Port)
 
-	log.Printf("holdem backend listening on %s using %s", addr, presetsPath)
+	authState := "disabled"
+	if authPassword != "" {
+		authState = "enabled"
+	}
+	log.Printf("holdem backend listening on %s using %s (auth: %s)", addr, presetsPath, authState)
 	if err := http.ListenAndServe(addr, server.Handler()); err != nil {
 		log.Fatal(err)
 	}

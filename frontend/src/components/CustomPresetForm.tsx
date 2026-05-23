@@ -1,0 +1,210 @@
+import { useState } from 'react'
+import { probeInlinePreset } from '../lib/api'
+import { extractInlineConfig, makeCustomPresetId } from '../lib/customPresets'
+import type { CustomPresetEntry, StructuredOutputMode } from '../lib/types'
+
+type Props = {
+  // When editing an existing entry, this is the current value; null means
+  // "creating a new one".
+  initial: CustomPresetEntry | null
+  onSubmit: (entry: CustomPresetEntry) => void
+  onCancel: () => void
+  onDelete?: (id: string) => void
+}
+
+const STRUCTURED_MODES: { value: StructuredOutputMode; label: string; hint: string }[] = [
+  { value: 'tool_call', label: 'tool_call', hint: 'OpenAI tools 调用，最稳定（GPT 类）' },
+  { value: 'json_object', label: 'json_object', hint: 'response_format 强制 JSON（GLM/Kimi/DeepSeek）' },
+  { value: 'none', label: 'none', hint: '只靠 prompt 自然语言约束 + parser fallback' },
+]
+
+export function CustomPresetForm({ initial, onSubmit, onCancel, onDelete }: Props) {
+  const [name, setName] = useState(initial?.name ?? '')
+  const [endpoint, setEndpoint] = useState(initial?.endpoint ?? '')
+  const [token, setToken] = useState(initial?.token ?? '')
+  const [model, setModel] = useState(initial?.model ?? '')
+  const [structuredOutput, setStructuredOutput] = useState<StructuredOutputMode>(
+    initial?.structuredOutput ?? 'tool_call',
+  )
+  const [systemPrompt, setSystemPrompt] = useState(initial?.systemPrompt ?? '')
+  const [probing, setProbing] = useState(false)
+  const [probeResult, setProbeResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const trimmedName = name.trim()
+  const trimmedEndpoint = endpoint.trim()
+  const trimmedToken = token.trim()
+  const trimmedModel = model.trim()
+  const canSubmit = trimmedName !== '' && trimmedEndpoint !== '' && trimmedToken !== '' && trimmedModel !== ''
+
+  return (
+    <form
+      className="custom-preset-form"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (!canSubmit) {
+          setError('请补全名称 / endpoint / token / model 四个必填字段。')
+          return
+        }
+        const entry: CustomPresetEntry = {
+          id: initial?.id ?? makeCustomPresetId(),
+          name: trimmedName,
+          endpoint: trimmedEndpoint,
+          token: trimmedToken,
+          model: trimmedModel,
+          structuredOutput,
+          systemPrompt: systemPrompt.trim(),
+        }
+        onSubmit(entry)
+      }}
+    >
+      <div className="custom-preset-form-head">
+        <strong>{initial ? '编辑自定义模型' : '添加自定义模型'}</strong>
+        <p className="muted-text">
+          token 只保存在你这台浏览器的 localStorage，不会进 git，也不会写入后端 SQLite；只在「检测」和「开始比赛」时
+          以 inline 方式发到后端。
+        </p>
+      </div>
+
+      <div className="custom-preset-form-grid">
+        <label>
+          <span>显示名称</span>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="例如：我的 Claude Sonnet"
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          <span>endpoint</span>
+          <input
+            type="text"
+            value={endpoint}
+            onChange={(e) => setEndpoint(e.target.value)}
+            placeholder="https://api.example.com/v1"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <label>
+          <span>token</span>
+          <input
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder="sk-... / at-..."
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <label>
+          <span>model</span>
+          <input
+            type="text"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="例如：gpt-5.4 / glm-5 / claude-sonnet-4"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <label>
+          <span>结构化输出</span>
+          <select
+            value={structuredOutput}
+            onChange={(e) => setStructuredOutput(e.target.value as StructuredOutputMode)}
+          >
+            {STRUCTURED_MODES.map((mode) => (
+              <option key={mode.value} value={mode.value}>
+                {mode.label} — {mode.hint}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="custom-preset-form-wide">
+          <span>system prompt（可选；建议留空保持 benchmark 公平）</span>
+          <textarea
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            rows={3}
+            placeholder="留空即使用后端默认决策框架，所有模型在同一公平起点上 PK。"
+          />
+        </label>
+      </div>
+
+      {error ? <p className="error-text">{error}</p> : null}
+      {probeResult ? (
+        <p className={`probe-summary ${probeResult.ok ? 'ok' : 'error'}`}>{probeResult.message}</p>
+      ) : null}
+
+      <div className="custom-preset-form-actions">
+        <button
+          type="button"
+          className="ghost-button"
+          disabled={!canSubmit || probing}
+          onClick={async () => {
+            setError(null)
+            setProbing(true)
+            setProbeResult(null)
+            try {
+              const result = await probeInlinePreset(
+                extractInlineConfig({
+                  id: initial?.id ?? makeCustomPresetId(),
+                  name: trimmedName,
+                  endpoint: trimmedEndpoint,
+                  token: trimmedToken,
+                  model: trimmedModel,
+                  structuredOutput,
+                  systemPrompt: systemPrompt.trim(),
+                }),
+              )
+              if (result.ok) {
+                setProbeResult({
+                  ok: true,
+                  message: `连通正常 · ${result.latencyMs}ms${result.model ? ` · ${result.model}` : ''}`,
+                })
+              } else {
+                setProbeResult({
+                  ok: false,
+                  message: `连通失败：${result.error || '未知错误'}`,
+                })
+              }
+            } catch (err) {
+              setProbeResult({
+                ok: false,
+                message: `连通失败：${err instanceof Error ? err.message : String(err)}`,
+              })
+            } finally {
+              setProbing(false)
+            }
+          }}
+        >
+          {probing ? '检测中...' : '检测连通性'}
+        </button>
+
+        <div className="custom-preset-form-actions-end">
+          {initial && onDelete ? (
+            <button
+              type="button"
+              className="danger-button"
+              onClick={() => {
+                if (!window.confirm(`确定删除自定义模型 "${initial.name}" 吗？`)) return
+                onDelete(initial.id)
+              }}
+            >
+              删除
+            </button>
+          ) : null}
+          <button type="button" className="ghost-button" onClick={onCancel}>
+            取消
+          </button>
+          <button type="submit" className="primary-button" disabled={!canSubmit}>
+            {initial ? '保存修改' : '添加'}
+          </button>
+        </div>
+      </div>
+    </form>
+  )
+}

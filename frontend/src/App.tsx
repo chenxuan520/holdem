@@ -8,11 +8,23 @@ import {
   fetchPresets,
   fetchRecords,
   fetchReplay,
+  probeInlinePreset,
   probePreset,
   submitAction,
 } from './lib/api'
+import { clearStoredPassword } from './lib/auth'
+import { extractInlineConfig, loadCustomPresets, saveCustomPresets } from './lib/customPresets'
 import { subscribeMatchStream } from './lib/sse'
-import type { MatchSnapshot, Preset, PresetProbeStatus, RecordSummary, ReplayDetail, StreamEvent } from './lib/types'
+import type {
+  CustomPresetEntry,
+  InlinePresetConfig,
+  MatchSnapshot,
+  Preset,
+  PresetProbeStatus,
+  RecordSummary,
+  ReplayDetail,
+  StreamEvent,
+} from './lib/types'
 import { HistoryView } from './pages/HistoryView'
 import { LobbyView } from './pages/LobbyView'
 import { ReplayView } from './pages/ReplayView'
@@ -52,6 +64,14 @@ export default function App() {
   const [clearingRecords, setClearingRecords] = useState(false)
   const [probeStatuses, setProbeStatuses] = useState<Record<string, PresetProbeStatus>>({})
   const [probing, setProbing] = useState(false)
+  // customPresets are user-defined endpoint/token/model configs that live
+  // entirely in browser localStorage. They show up in lobby seat dropdowns
+  // alongside backend presets and travel inline with each match-create
+  // request — never persisted to the SQLite store.
+  const [customPresets, setCustomPresets] = useState<CustomPresetEntry[]>(() => loadCustomPresets())
+  useEffect(() => {
+    saveCustomPresets(customPresets)
+  }, [customPresets])
   const activeMatchID = match?.id ?? null
 
   // Drop stale probe results when the user changes seats / models so old
@@ -86,7 +106,10 @@ export default function App() {
     // to fan out N parallel hung requests, and the latencies stay readable.
     for (const id of uniqueIds) {
       try {
-        const result = await probePreset(id)
+        const customEntry = customPresets.find((entry) => entry.id === id)
+        const result = customEntry
+          ? await probeInlinePreset(extractInlineConfig(customEntry))
+          : await probePreset(id)
         setProbeStatuses((current) => ({
           ...current,
           [id]: result.ok
@@ -101,6 +124,47 @@ export default function App() {
       }
     }
     setProbing(false)
+  }
+
+  // resolveCreatePayload converts the user-facing seat list (which can mix
+  // backend preset ids with `custom-*` ids referring to localStorage
+  // entries) into the wire shape the backend expects: backend ids stay
+  // verbatim, custom-* ids become `@inline:N` markers and their full
+  // configs get attached as aiInlinePresets[N].
+  function resolveCreatePayload(): { aiPresetIds: string[]; aiInlinePresets: InlinePresetConfig[] } {
+    const inlineConfigs: InlinePresetConfig[] = []
+    const indexById = new Map<string, number>()
+    const aiPresetIds = selectedAI.map((id) => {
+      const customEntry = customPresets.find((entry) => entry.id === id)
+      if (!customEntry) return id
+      let idx = indexById.get(id)
+      if (idx === undefined) {
+        idx = inlineConfigs.length
+        inlineConfigs.push(extractInlineConfig(customEntry))
+        indexById.set(id, idx)
+      }
+      return `@inline:${idx}`
+    })
+    return { aiPresetIds, aiInlinePresets: inlineConfigs }
+  }
+
+  function handleSaveCustomPreset(entry: CustomPresetEntry) {
+    setCustomPresets((current) => {
+      const existing = current.findIndex((item) => item.id === entry.id)
+      if (existing >= 0) {
+        const next = [...current]
+        next[existing] = entry
+        return next
+      }
+      return [...current, entry]
+    })
+  }
+
+  function handleDeleteCustomPreset(id: string) {
+    setCustomPresets((current) => current.filter((entry) => entry.id !== id))
+    // Also drop the seat that referenced it; the rest of the lobby state
+    // recomputes from selectedAI.
+    setSelectedAI((current) => current.filter((presetID) => presetID !== id))
   }
 
   useEffect(() => {
@@ -222,11 +286,13 @@ export default function App() {
     setCreating(true)
     setError(null)
     try {
+      const { aiPresetIds, aiInlinePresets } = resolveCreatePayload()
       const snapshot = await createMatch({
         initialChips,
         smallBlind,
         bigBlind,
-        aiPresetIds: selectedAI,
+        aiPresetIds,
+        aiInlinePresets: aiInlinePresets.length > 0 ? aiInlinePresets : undefined,
         aiPlayerNames,
         humanName,
         spectatorMode,
@@ -304,15 +370,30 @@ export default function App() {
     await openReplay(item.id)
   }
 
+  // combinedPresets bundles backend-loaded and browser-only entries into a
+  // single Preset[]-compatible catalog. Used by name reconciliation and
+  // default-seat picking so custom models behave like first-class presets.
+  const combinedPresets: Preset[] = [
+    ...presets,
+    ...customPresets.map<Preset>((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      endpoint: entry.endpoint,
+      model: entry.model,
+      systemPrompt: entry.systemPrompt ?? '',
+      structuredOutput: entry.structuredOutput,
+    })),
+  ]
+
   function applySeats(nextSelectedAI: string[], nextNames: string[], nextFlags: boolean[]) {
-    const reconciled = reconcileAINames(nextSelectedAI, nextNames, nextFlags, presets)
+    const reconciled = reconcileAINames(nextSelectedAI, nextNames, nextFlags, combinedPresets)
     setSelectedAI(nextSelectedAI)
     setAIPlayerNames(reconciled.names)
     setCustomNameFlags(reconciled.flags)
   }
 
   function handleAddSeat() {
-    const nextPreset = pickNextDefaultPreset(presets, selectedAI)
+    const nextPreset = pickNextDefaultPreset(combinedPresets, selectedAI)
     if (!nextPreset) return
     if (selectedAI.length >= (spectatorMode ? 6 : 5)) return
     const nextSelectedAI = [...selectedAI, nextPreset.id]
@@ -374,6 +455,20 @@ export default function App() {
 
           <div className="nav-status">
             <span className={`status-pill ${streamStatus}`}>{match ? `实时 ${streamStatus === 'connected' ? '已连接' : '未连接'}` : '尚未开局'}</span>
+            <button
+              className="ghost-button compact nav-logout"
+              type="button"
+              onClick={() => {
+                if (!window.confirm('退出后需要重新输入访问密码，确定吗？')) return
+                clearStoredPassword()
+                // The AuthGate listens for this and swaps to the login form;
+                // dispatching here keeps the click → form transition instant
+                // without waiting for the next 401 from a stray API call.
+                window.dispatchEvent(new CustomEvent('holdem:auth-required'))
+              }}
+            >
+              退出
+            </button>
           </div>
         </header>
 
@@ -383,6 +478,7 @@ export default function App() {
         {view === 'lobby' ? (
           <LobbyView
             presets={presets}
+            customPresets={customPresets}
             selectedAI={selectedAI}
             aiPlayerNames={aiPlayerNames}
             humanName={humanName}
@@ -433,6 +529,8 @@ export default function App() {
             probeStatuses={probeStatuses}
             probing={probing}
             onProbeAll={handleProbeAll}
+            onSaveCustomPreset={handleSaveCustomPreset}
+            onDeleteCustomPreset={handleDeleteCustomPreset}
           />
         ) : null}
 

@@ -1035,6 +1035,192 @@ select {
 
 .nav-status {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nav-logout {
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+.auth-gate-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(at 30% 20%, rgba(89, 199, 255, 0.12), transparent 65%),
+    radial-gradient(at 70% 80%, rgba(155, 89, 255, 0.1), transparent 60%),
+    #060c1c;
+  padding: 24px;
+  z-index: 9999;
+}
+
+.auth-gate-card {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 28px;
+}
+
+.auth-gate-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-gate-header strong {
+  font-size: 18px;
+}
+
+.auth-gate-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #a5b7d5;
+}
+
+.auth-gate-field input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(125, 158, 211, 0.32);
+  background: rgba(8, 14, 30, 0.7);
+  color: #e6ecff;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+
+.auth-gate-field input:focus {
+  outline: 2px solid rgba(89, 199, 255, 0.6);
+  outline-offset: 1px;
+}
+
+.auth-gate-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 82, 110, 0.12);
+  color: #ffb3c2;
+  font-size: 13px;
+}
+
+.auth-gate-footnote {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.custom-preset-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: rgba(8, 14, 30, 0.55);
+  border: 1px solid rgba(125, 158, 211, 0.22);
+}
+
+.custom-preset-form-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.custom-preset-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+}
+
+.custom-preset-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #a5b7d5;
+}
+
+.custom-preset-form-grid input,
+.custom-preset-form-grid select,
+.custom-preset-form-grid textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(125, 158, 211, 0.32);
+  background: rgba(8, 14, 30, 0.7);
+  color: #e6ecff;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.custom-preset-form-grid textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.custom-preset-form-wide {
+  grid-column: 1 / -1;
+}
+
+.custom-preset-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.custom-preset-form-actions-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.custom-preset-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.custom-preset-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(125, 158, 211, 0.22);
+  background: rgba(8, 14, 30, 0.4);
+}
+
+.custom-preset-list-item strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.custom-preset-list-item small {
+  display: block;
+  color: #8093b1;
+  font-size: 12px;
+}
+
+.preset-card-custom {
+  border-color: rgba(255, 184, 89, 0.45);
+  background: linear-gradient(160deg, rgba(255, 184, 89, 0.08), rgba(8, 14, 30, 0.0)), rgba(8, 14, 30, 0.7);
+}
+
+.preset-card-edit {
+  margin-top: 10px;
+  align-self: flex-start;
 }
 
 .error-banner {

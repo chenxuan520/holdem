@@ -8,14 +8,24 @@ import (
 )
 
 type RuntimeConfig struct {
-	Backend BackendRuntimeConfig `json:"backend"`
+	Backend  BackendRuntimeConfig  `json:"backend"`
 	Frontend FrontendRuntimeConfig `json:"frontend"`
+	Auth     AuthRuntimeConfig     `json:"auth"`
 }
 
 type BackendRuntimeConfig struct {
-	Port       int    `json:"port"`
-	DataPath   string `json:"dataPath"`
+	Port        int    `json:"port"`
+	DataPath    string `json:"dataPath"`
 	PresetsPath string `json:"presetsPath"`
+}
+
+// AuthRuntimeConfig holds the (very minimal) protection layer in front of
+// the API. If Password is empty, auth is disabled and the API is open
+// (suitable for local-only dev). When non-empty, every /api/* request must
+// carry it as `X-Holdem-Password` header — or, for the SSE stream, as a
+// `?token=` query parameter, since EventSource can't set custom headers.
+type AuthRuntimeConfig struct {
+	Password string `json:"password"`
 }
 
 type FrontendRuntimeConfig struct {

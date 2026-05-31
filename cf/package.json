@@ -1,0 +1,23 @@
+{
+  "name": "holdem-cf",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Workers + Durable Objects backend for Holdem AI Battle, sharing the Go referee core via WebAssembly.",
+  "scripts": {
+    "build:wasm": "bash build-wasm.sh",
+    "predev": "npm run build:wasm",
+    "dev": "wrangler dev",
+    "predeploy": "npm run build:wasm",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run build:wasm",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.10",
+    "@cloudflare/workers-types": "^4.20260531.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7",
+    "wrangler": "^4.95.0"
+  }
+}

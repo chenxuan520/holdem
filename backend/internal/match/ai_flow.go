@@ -18,7 +18,15 @@ import (
 //
 // The exact same prompt is sent for every preset; only endpoint / token /
 // model differ across benchmark seats so comparisons stay fair.
+//
+// buildPromptInput is a package-level pure function (no Service state) so the
+// WebAssembly referee core can reuse it verbatim. The Service keeps a thin
+// method wrapper below for existing call sites.
 func (s *Service) buildPromptInput(snapshot Snapshot, hidden *hiddenState, seat int) backendai.PromptInput {
+	return buildPromptInput(snapshot, hidden, seat)
+}
+
+func buildPromptInput(snapshot Snapshot, hidden *hiddenState, seat int) backendai.PromptInput {
 	hand := hidden.hand
 
 	dealerSeat := -1

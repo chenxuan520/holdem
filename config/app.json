@@ -7,7 +7,7 @@
   "frontend": {
     "host": "127.0.0.1",
     "port": 5173,
-    "apiTarget": "http://127.0.0.1:18130"
+    "apiTarget": "https://holdem-cf.011203.workers.dev"
   },
   "auth": {
     "password": ""

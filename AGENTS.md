@@ -102,7 +102,34 @@
 - **绝对不要**把 sniff 出来的 apiKey / `at-` token 贴到 commit message、PR 描
   述、agent log、replay JSON 里——这些 token 仍是有效凭证。
 
+## Cloudflare Workers 后端（`cf/`）
+
+与 `backend/` Go 后端功能等价的**并存** CF 后端，已部署：
+**https://holdem-cf.011203.workers.dev**（账号 chenxuan）。详见 `cf/README.md`。
+
+- **裁判核心复用 Go**：`backend/cmd/wasmcore` 把 `backend/internal/{match,ai,config}`
+  的纯函数编译成**完整 Go WASM**（非 TinyGo，为保 `encoding/json` 字节精确）。改
+  规则/评牌/prompt 时改 Go 源即可，两个后端一起受益；别在 TS 里重写引擎逻辑。
+  - reducer 边界在 `backend/internal/match/reducer.go`（`Core*` 函数，无 build tag、
+    可被 Go 测试和 wasm 共用）；对拍测试在 `reducer_test.go`。
+  - 改了 Go 核心后必须 `cd cf && npm run build:wasm` 重新生成 `cf/src/core.wasm`
+    （build:wasm 会从 `$(go env GOROOT)/lib/wasm/wasm_exec.js` 重拷 glue）。
+- **全栈只用 Durable Objects（SQLite-backed），不用 D1**；MatchDO=每桌一个，
+  RegistryDO=`getByName("registry")` 单例做跨桌 records/replays 索引。
+- **AI 默认 Workers AI 绑定（`env.AI`，零 token、免费 10k neurons/天）**：内置
+  gpt-oss-120b / glm-4.7-flash / kimi-k2.5。`provider:"workers-ai"` 的 preset 走
+  `env.AI.run`，其余走 OpenAI 兼容 fetch。要用外部模型设 `HOLDEM_PRESETS` secret。
+- **部署**：`cd cf && npm run deploy`（免费计划即可，默认无需 secret）。可选
+  `wrangler secret put HOLDEM_AUTH_PASSWORD`（访问密码，env 同名语义，别写进
+  `config/app.json`）。
+- **前端指向**：`config/app.json` 的 `frontend.apiTarget` 现指向部署 URL；要切回
+  本地 Go 后端改回 `http://127.0.0.1:18130`。
+- **成本**：Workers AI 免费层 10k neurons/天；`wrangler dev` 也会对 `env.AI` 发**真实**
+  调用。本地零成本调试用 `cf/.dev.vars`（gitignored）里的 mock `HOLDEM_PRESETS`
+  指向假 LLM。inline 自定义 preset 的 token 落对应 MatchDO storage（per-match）。
+
 ## 实现留痕
 
 - 计划文档在 `.agents/plans/2026-05-21-holdem-ai-battle.md`
 - 新实现只追加到 `## 实现 -> ### 更新日志`
+- CF 移植的计划文档在 `.cursor/plans/cf-workers-backend-port-*.plan.md`

@@ -1,6 +1,10 @@
 package match
 
-import "time"
+import (
+	"time"
+
+	backendai "holdem/backend/internal/ai"
+)
 
 type ReplaySummary struct {
 	ID           string    `json:"id"`
@@ -80,7 +84,11 @@ type AILog struct {
 	Endpoint       string    `json:"endpoint"`
 	RequestPayload any       `json:"requestPayload"`
 	ResponseBody   string    `json:"responseBody"`
-	Structured     any       `json:"structured"`
+	// Structured is the concrete decision (not `any`) so the replay JSON
+	// round-trips byte-stably through the CF backend's DO-storage / wasm
+	// boundary. With `any` it decoded back into a map and re-serialized in
+	// alphabetical key order, diverging from the native struct-field order.
+	Structured backendai.Decision `json:"structured"`
 	CreatedAt      time.Time `json:"createdAt"`
 	AttemptCount   int       `json:"attemptCount,omitempty"`
 	Error          string    `json:"error,omitempty"`

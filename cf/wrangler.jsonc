@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "holdem-cf",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [
+      { "name": "MATCH_DO", "class_name": "MatchDO" },
+      { "name": "REGISTRY_DO", "class_name": "RegistryDO" }
+    ]
+  },
+  // Workers AI: the default, zero-token AI provider (free 10k neurons/day).
+  // Used by presets with provider "workers-ai" via the MatchDO adapter.
+  "ai": { "binding": "AI" },
+  // SQLite-backed Durable Objects are the only kind available on the Workers
+  // Free plan, and are what we rely on (no D1). The migration registers both
+  // classes with the SQLite storage backend.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["MatchDO", "RegistryDO"] }
+  ]
+  // `.wasm` imports compile to WebAssembly.Module via wrangler's default
+  // CompiledWasm rule, so no custom "rules" entry is needed.
+}

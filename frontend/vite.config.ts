@@ -23,7 +23,13 @@ export default defineConfig({
     host: runtimeConfig.frontend?.host ?? '127.0.0.1',
     port: runtimeConfig.frontend?.port ?? 5173,
     proxy: {
-      '/api': runtimeConfig.frontend?.apiTarget ?? 'http://127.0.0.1:18130',
+      // Object form + changeOrigin so the proxy works against both a local Go
+      // backend (http://127.0.0.1:18130) and a remote HTTPS target like the
+      // deployed Cloudflare Worker (which needs the right Host/SNI to route).
+      '/api': {
+        target: runtimeConfig.frontend?.apiTarget ?? 'http://127.0.0.1:18130',
+        changeOrigin: true,
+      },
     },
   },
 })

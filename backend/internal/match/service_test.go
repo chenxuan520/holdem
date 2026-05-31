@@ -3,7 +3,6 @@ package match
 import (
 	"errors"
 	"fmt"
-	backendai "holdem/backend/internal/ai"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -281,10 +280,7 @@ func TestRepeatedAIFailuresFallbackToFold(t *testing.T) {
 	if hidden == nil || len(hidden.replay.AILogs) == 0 {
 		t.Fatalf("expected AI log to be recorded")
 	}
-	decision, ok := hidden.replay.AILogs[0].Structured.(backendai.Decision)
-	if !ok {
-		t.Fatalf("expected structured AI log to keep decision, got %T", hidden.replay.AILogs[0].Structured)
-	}
+	decision := hidden.replay.AILogs[0].Structured
 	if decision.Action != "fold" {
 		t.Fatalf("expected repeated request failure to fallback to fold, got %+v", decision)
 	}

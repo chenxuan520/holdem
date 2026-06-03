@@ -40,6 +40,8 @@ export interface GoCore {
   holdemRecordSummaryFromSnapshot(snapshotJSON: string): string;
   holdemRecordSummaryFromReplay(replayJSON: string): string;
   holdemReplayFromRecord(recordJSON: string): string;
+  holdemBuildSchedule(configJSON: string): string;
+  holdemAggregateStandings(inputJSON: string): string;
 }
 
 interface GoRuntime {
@@ -74,6 +76,8 @@ function instantiate(): Promise<GoCore> {
       holdemRecordSummaryFromSnapshot: g.holdemRecordSummaryFromSnapshot as GoCore["holdemRecordSummaryFromSnapshot"],
       holdemRecordSummaryFromReplay: g.holdemRecordSummaryFromReplay as GoCore["holdemRecordSummaryFromReplay"],
       holdemReplayFromRecord: g.holdemReplayFromRecord as GoCore["holdemReplayFromRecord"],
+      holdemBuildSchedule: g.holdemBuildSchedule as GoCore["holdemBuildSchedule"],
+      holdemAggregateStandings: g.holdemAggregateStandings as GoCore["holdemAggregateStandings"],
     };
   });
 }

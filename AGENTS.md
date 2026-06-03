@@ -118,6 +118,42 @@
 - **绝对不要**把 sniff 出来的 apiKey / `at-` token 贴到 commit message、PR 描
   述、agent log、replay JSON 里——这些 token 仍是有效凭证。
 
+## AI 擂台 / 排行榜（前端「擂台排行」标签）
+
+AI 循环联赛 + 排行榜：编排器自动批量开**全自动观战桌**跑完，再聚合成排行榜
+（头牌**夺冠率** + 抗同桌干扰的**多人 Elo 评分** + 平均名次 / bb100 / 净筹码 /
+出错率）。两个后端等价实现。
+
+- **复用现有引擎，不动扑克规则核心**：联赛桌就是
+ `{spectatorMode:true, semiAutoMode:false, manualMode:false}` 的普通全自动观战
+ 桌（Go 每桌 goroutine、CF 每桌 `setAlarm` 链自驱）。改规则/评牌别想着为擂台
+ 单独开分支。
+- **算分逻辑在共享 WASM 核心**：`backend/internal/match/tournament.go` 的
+ `CoreBuildSchedule` + `CoreAggregateStandings` 是纯函数，经
+ `backend/cmd/wasmcore`（`holdemBuildSchedule` / `holdemAggregateStandings`）暴露
+ 给 CF，`cf/src/core.ts` 做类型包装。**改赛程/算分改这里**，改完务必
+ `cd cf && npm run build:wasm` 重生成 `cf/src/core.wasm`，否则两后端会算出不同
+ 排行榜。
+- **赛制默认全员同桌**：`tableSize=0` → `min(模型数,6)`；模型 ≤ 桌容量时每轮全员
+ 同坐一桌、重复 `rounds` 局（零配对偏差，避开 1v1 与"同桌对手强弱"两个坑），
+ 模型更多才均衡切桌；`tableSize=2` 是可选 heads-up 基准。
+- **接口**（Go `httpapi/server.go` 与 CF `index.ts` 一一对应）：
+ `POST /api/tournaments`（建+开跑）、`GET /api/tournaments`、
+ `GET /api/tournaments/{id}`、`POST /api/tournaments/{id}/control`（仅 `stop`）、
+ `DELETE /api/tournaments/{id}`。
+- **存储**：Go 落 SQLite `tournaments` 表（经可选 `tournamentStore` 接口，不在
+ `ReplayStore` 里，别给它加方法否则要改一堆测试假实现）；CF 落单例
+ `TournamentDO`（`getByName("arena")`）自己的 SQLite。重启后**不自动续跑**，
+ in-flight 联赛标 `interrupted`。
+- **成本是硬约束**（和"纯 AI 观战默认半自动、每手停"的原则调和：联赛是显式开启、
+ 有界、可随时停的特例）：
+ - 两后端 `normalize*Config` 强制夹住 `maxConcurrency≤6 / maxHandsPerMatch≤1000
+ / maxMatches≤500`，别在前端绕过。
+ - 长时间对拍优先用 **CF + Workers-AI 免费模型**（10k neurons/天，近零成本）；
+ 本机 Go + 付费 endpoint 跑联赛会烧真实 token，前端会弹付费警告。
+ - 上榜池目前**只认内置 preset**（稳定身份）；inline 自定义模型还不上榜。
+ - 跑飞了就点排行榜面板的「停止」（停掉新建 + 在跑桌）。
+
 ## Cloudflare Workers 后端（`cf/`）
 
 与 `backend/` Go 后端功能等价的**并存** CF 后端，已部署：

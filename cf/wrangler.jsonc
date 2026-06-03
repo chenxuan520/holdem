@@ -8,7 +8,8 @@
   "durable_objects": {
     "bindings": [
       { "name": "MATCH_DO", "class_name": "MatchDO" },
-      { "name": "REGISTRY_DO", "class_name": "RegistryDO" }
+      { "name": "REGISTRY_DO", "class_name": "RegistryDO" },
+      { "name": "TOURNAMENT_DO", "class_name": "TournamentDO" }
     ]
   },
   // Workers AI: the default, zero-token AI provider (free 10k neurons/day).
@@ -18,7 +19,8 @@
   // Free plan, and are what we rely on (no D1). The migration registers both
   // classes with the SQLite storage backend.
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["MatchDO", "RegistryDO"] }
+    { "tag": "v1", "new_sqlite_classes": ["MatchDO", "RegistryDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["TournamentDO"] }
   ]
   // `.wasm` imports compile to WebAssembly.Module via wrangler's default
   // CompiledWasm rule, so no custom "rules" entry is needed.

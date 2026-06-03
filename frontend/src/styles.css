@@ -1611,6 +1611,46 @@ select {
   background: rgba(255, 255, 255, 0.025);
 }
 
+.history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.history-filter,
+.history-search {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 9px 12px;
+  color: #eaf1ff;
+  font-size: 14px;
+}
+
+.history-search {
+  flex: 1 1 200px;
+  min-width: 160px;
+}
+
+.history-search::placeholder {
+  color: #7f93b7;
+}
+
+.history-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.history-page-indicator {
+  font-size: 13px;
+  color: #90a2c1;
+}
+
 .history-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3058,4 +3098,263 @@ select {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 4px;
+}
+
+/* === AI 擂台 / 排行榜 (ArenaView) === */
+
+.arena-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .arena-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.arena-config,
+.arena-results {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.arena-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #aebbd6;
+}
+
+.arena-field input,
+.arena-field select,
+.arena-select {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #eaf1ff;
+  font-size: 14px;
+}
+
+.arena-blinds {
+  display: flex;
+  gap: 8px;
+}
+
+.arena-blinds input {
+  width: 100%;
+}
+
+.arena-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.arena-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 8px;
+}
+
+.arena-preset-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #dce6fa;
+}
+
+.arena-preset-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.arena-preset-item small {
+  margin-left: auto;
+  color: #7f93b7;
+  font-size: 12px;
+}
+
+.arena-estimate {
+  font-size: 13px;
+  color: #b6c4e0;
+  background: rgba(78, 140, 255, 0.1);
+  border: 1px solid rgba(78, 140, 255, 0.2);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+
+.arena-estimate strong {
+  color: #cfe0ff;
+}
+
+.arena-warning {
+  font-size: 13px;
+  color: #ffd895;
+  background: rgba(255, 191, 87, 0.1);
+  border: 1px solid rgba(255, 191, 87, 0.25);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+
+.arena-status-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.arena-progress {
+  flex: 1 1 160px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  min-width: 120px;
+}
+
+.arena-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #4d8bff, #6be3a3);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.arena-table-wrap {
+  overflow-x: auto;
+}
+
+.arena-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.arena-table th,
+.arena-table td {
+  padding: 10px 12px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.arena-table th:nth-child(1),
+.arena-table th:nth-child(2),
+.arena-table td:nth-child(1),
+.arena-table td:nth-child(2) {
+  text-align: left;
+}
+
+.arena-table thead th {
+  color: #8fa3c6;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.arena-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.arena-sortable:hover {
+  color: #cfe0ff;
+}
+
+.arena-sortable.active {
+  color: #6be3a3;
+}
+
+.arena-name {
+  font-weight: 600;
+  color: #eaf1ff;
+}
+
+.arena-strong {
+  font-weight: 700;
+  color: #cfe0ff;
+}
+
+.arena-pos {
+  color: #9bf0bd;
+}
+
+.arena-neg {
+  color: #ffb8c3;
+}
+
+.arena-matches h3 {
+  margin: 4px 0 10px;
+  font-size: 15px;
+  color: #cad7f0;
+}
+
+.arena-match-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.arena-match {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.arena-match-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #8fa3c6;
+}
+
+.arena-match-body {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.arena-match-body strong {
+  color: #eaf1ff;
+}
+
+.arena-match-body small {
+  color: #7f93b7;
+}
+
+.status-pill.pending {
+  background: rgba(255, 255, 255, 0.06);
+  color: #9fb1d0;
+}
+
+.status-pill.failed {
+  background: rgba(255, 107, 129, 0.16);
+  color: #ffb8c3;
+}
+
+.status-pill.interrupted {
+  background: rgba(255, 191, 87, 0.16);
+  color: #ffd895;
+}
+
+.muted {
+  color: #8fa3c6;
 }

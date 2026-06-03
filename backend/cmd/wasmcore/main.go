@@ -35,6 +35,8 @@ func main() {
 	js.Global().Set("holdemRecordSummaryFromSnapshot", js.FuncOf(recordSummaryFromSnapshot))
 	js.Global().Set("holdemRecordSummaryFromReplay", js.FuncOf(recordSummaryFromReplay))
 	js.Global().Set("holdemReplayFromRecord", js.FuncOf(replayFromRecord))
+	js.Global().Set("holdemBuildSchedule", js.FuncOf(buildSchedule))
+	js.Global().Set("holdemAggregateStandings", js.FuncOf(aggregateStandings))
 	js.Global().Set("holdemReady", js.ValueOf(true))
 	// Park forever so the registered callbacks stay reachable; the Worker
 	// keeps one instance warm per isolate and invokes these on demand.
@@ -266,4 +268,26 @@ func replayFromRecord(this js.Value, args []js.Value) any {
 		return fail("decode record: " + err.Error())
 	}
 	return reply(envelope{Data: raw(match.CoreNormalizeReplay(rec.Replay))})
+}
+
+// ---- tournament / leaderboard math (TournamentDO) ----
+
+func buildSchedule(this js.Value, args []js.Value) any {
+	var cfg match.TournamentConfig
+	if err := json.Unmarshal([]byte(arg(args, 0)), &cfg); err != nil {
+		return fail("decode config: " + err.Error())
+	}
+	plans, err := match.CoreBuildSchedule(cfg)
+	if err != nil {
+		return fail(err.Error())
+	}
+	return reply(envelope{Data: raw(plans)})
+}
+
+func aggregateStandings(this js.Value, args []js.Value) any {
+	var in match.StandingsInput
+	if err := json.Unmarshal([]byte(arg(args, 0)), &in); err != nil {
+		return fail("decode standings input: " + err.Error())
+	}
+	return reply(envelope{Data: raw(match.CoreAggregateStandings(in))})
 }

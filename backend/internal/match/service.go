@@ -115,6 +115,7 @@ type Service struct {
 	ai          *ai.Client
 	store       ReplayStore
 	autoplaying map[string]bool
+	tournaments map[string]*tournamentState
 }
 
 func NewService(presets []config.Preset, replayStore ReplayStore) *Service {
@@ -127,6 +128,7 @@ func NewService(presets []config.Preset, replayStore ReplayStore) *Service {
 	hidden := map[string]*hiddenState{}
 	sequences := map[string]int{}
 	replays := map[string]ReplayDetail{}
+	tournaments := map[string]*tournamentState{}
 	if replayStore != nil {
 		if activeMatches, err := replayStore.ListActiveMatches(); err == nil {
 			for _, record := range activeMatches {
@@ -153,6 +155,20 @@ func NewService(presets []config.Preset, replayStore ReplayStore) *Service {
 				}
 			}
 		}
+		// Tournaments are persisted via an optional store extension (the
+		// SQLite store implements it; test fakes don't). In-flight leagues
+		// don't auto-resume: their matches are loaded with Running=false and
+		// nothing re-arms autoplay, so mark them interrupted.
+		if ts, ok := replayStore.(tournamentStore); ok {
+			if list, err := ts.ListTournaments(); err == nil {
+				for _, detail := range list {
+					if detail.Status == "running" || detail.Status == "pending" {
+						detail.Status = "interrupted"
+					}
+					tournaments[detail.ID] = &tournamentState{detail: detail, stopped: true}
+				}
+			}
+		}
 	}
 
 	return &Service{
@@ -165,6 +181,7 @@ func NewService(presets []config.Preset, replayStore ReplayStore) *Service {
 		ai:          ai.NewClient(),
 		store:       replayStore,
 		autoplaying: map[string]bool{},
+		tournaments: tournaments,
 	}
 }
 

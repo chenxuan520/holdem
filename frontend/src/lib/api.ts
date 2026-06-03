@@ -9,6 +9,8 @@ import type {
   RecordSummary,
   ReplayDetail,
   ReplaySummary,
+  TournamentConfig,
+  TournamentDetail,
 } from './types'
 
 class UnauthorizedError extends Error {
@@ -185,6 +187,42 @@ export async function deleteReplay(id: string): Promise<void> {
 
 export async function clearReplays(): Promise<void> {
   const response = await authedFetch('/api/replays', {
+    method: 'DELETE',
+  })
+  await parseJSON<Record<string, never> | null>(response)
+}
+
+export async function createTournament(config: TournamentConfig): Promise<TournamentDetail> {
+  const response = await authedFetch('/api/tournaments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  })
+  return parseJSON<TournamentDetail>(response)
+}
+
+export async function fetchTournaments(): Promise<TournamentDetail[]> {
+  const response = await authedFetch('/api/tournaments')
+  const payload = await parseJSON<{ tournaments: TournamentDetail[] }>(response)
+  return payload.tournaments ?? []
+}
+
+export async function fetchTournament(id: string): Promise<TournamentDetail> {
+  const response = await authedFetch(`/api/tournaments/${id}`)
+  return parseJSON<TournamentDetail>(response)
+}
+
+export async function stopTournament(id: string): Promise<TournamentDetail> {
+  const response = await authedFetch(`/api/tournaments/${id}/control`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'stop' }),
+  })
+  return parseJSON<TournamentDetail>(response)
+}
+
+export async function deleteTournament(id: string): Promise<void> {
+  const response = await authedFetch(`/api/tournaments/${id}`, {
     method: 'DELETE',
   })
   await parseJSON<Record<string, never> | null>(response)

@@ -272,3 +272,59 @@ export async function replayFromRecord(record: MatchRecord): Promise<ReplayDetai
   const env = unwrap(g.holdemReplayFromRecord(JSON.stringify(record)));
   return env.data as ReplayDetail;
 }
+
+// ---- tournament / leaderboard math (TournamentDO) ----
+
+export interface TournamentConfig {
+  name: string;
+  presetIds: string[];
+  tableSize: number;
+  rounds: number;
+  maxHandsPerMatch: number;
+  initialChips: number;
+  smallBlind: number;
+  bigBlind: number;
+  maxConcurrency: number;
+  maxMatches: number;
+  seed?: number;
+}
+
+export interface MatchPlan {
+  round: number;
+  presetIds: string[];
+}
+
+export interface Standing {
+  presetId: string;
+  name: string;
+  matches: number;
+  wins: number;
+  winRate: number;
+  avgPlacement: number;
+  rating: number;
+  chipDelta: number;
+  bb100: number;
+  errorRate: number;
+  avgAttempts: number;
+}
+
+export interface StandingsInput {
+  replays: ReplayDetail[];
+  names?: Record<string, string>;
+}
+
+// buildSchedule expands a tournament config into concrete per-table plans
+// (full-auto spectator matches the TournamentDO will create).
+export async function buildSchedule(cfg: TournamentConfig): Promise<MatchPlan[]> {
+  const g = await goCore();
+  const env = unwrap(g.holdemBuildSchedule(JSON.stringify(cfg)));
+  return env.data as MatchPlan[];
+}
+
+// aggregateStandings folds finished replays into a leaderboard (identical math
+// to the native Go backend).
+export async function aggregateStandings(input: StandingsInput): Promise<Standing[]> {
+  const g = await goCore();
+  const env = unwrap(g.holdemAggregateStandings(JSON.stringify(input)));
+  return env.data as Standing[];
+}

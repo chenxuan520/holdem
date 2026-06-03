@@ -68,6 +68,18 @@ func (s *SQLiteReplayStore) init() error {
 	if err != nil {
 		return err
 	}
+	_, err = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS tournaments (
+		  id TEXT PRIMARY KEY,
+		  status TEXT NOT NULL,
+		  created_at TEXT NOT NULL,
+		  updated_at TEXT NOT NULL,
+		  payload_json TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -218,6 +230,63 @@ func (s *SQLiteReplayStore) DeleteActiveMatch(id string) error {
 
 func (s *SQLiteReplayStore) ClearActiveMatches() error {
 	_, err := s.db.Exec(`DELETE FROM active_matches`)
+	return err
+}
+
+// SaveTournament / ListTournaments / DeleteTournament implement the optional
+// tournament persistence extension consumed by match.Service (matched
+// structurally). The whole TournamentDetail rides in payload_json so new
+// fields round-trip without a schema migration.
+func (s *SQLiteReplayStore) SaveTournament(detail match.TournamentDetail) error {
+	payload, err := json.Marshal(detail)
+	if err != nil {
+		return err
+	}
+	status := detail.Status
+	if status == "" {
+		status = "running"
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO tournaments (id, status, created_at, updated_at, payload_json)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+		  status = excluded.status,
+		  updated_at = excluded.updated_at,
+		  payload_json = excluded.payload_json
+	`,
+		detail.ID,
+		status,
+		detail.CreatedAt.Format(timeLayout),
+		detail.UpdatedAt.Format(timeLayout),
+		string(payload),
+	)
+	return err
+}
+
+func (s *SQLiteReplayStore) ListTournaments() ([]match.TournamentDetail, error) {
+	rows, err := s.db.Query(`SELECT payload_json FROM tournaments ORDER BY updated_at DESC, created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	details := []match.TournamentDetail{}
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var detail match.TournamentDetail
+		if err := json.Unmarshal([]byte(payload), &detail); err != nil {
+			return nil, err
+		}
+		details = append(details, detail)
+	}
+	return details, rows.Err()
+}
+
+func (s *SQLiteReplayStore) DeleteTournament(id string) error {
+	_, err := s.db.Exec(`DELETE FROM tournaments WHERE id = ?`, id)
 	return err
 }
 

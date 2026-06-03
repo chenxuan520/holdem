@@ -50,7 +50,9 @@ describe('HistoryView', () => {
     expect(onClear).toHaveBeenCalledTimes(1)
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'replay-1', status: 'stopped' }))
     expect(onDelete).toHaveBeenCalledWith('replay-1')
-    expect(screen.getByText('已终止')).toBeInTheDocument()
+    // '已终止' now also appears as a status-filter <option>, so target the
+    // record card's status pill specifically.
+    expect(screen.getByText('已终止', { selector: '.status-pill' })).toBeInTheDocument()
     expect(screen.getByText('初始筹码 200')).toBeInTheDocument()
   })
 })

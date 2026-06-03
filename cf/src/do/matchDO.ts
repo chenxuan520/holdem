@@ -64,6 +64,23 @@ export class MatchDO extends DurableObject<Env> {
     return finalRecord.snapshot;
   }
 
+  // createAuto persists a fresh match and lets it self-drive on its own alarm,
+  // returning immediately instead of running the first autoplay chunk inline.
+  // Used by the TournamentDO scheduler so kicking off a league match never
+  // blocks the arena alarm on a full ~40-fetch chunk; the match then advances
+  // independently via its own alarm, exactly like a budget-continuation.
+  async createAuto(req: CreateRequest, presets: FullPreset[], id: string): Promise<Snapshot> {
+    const m = await createMatch(req, presets, id);
+    await this.ctx.storage.put({ record: m.record, seq: m.seq, presets, aiRequests: 0 });
+    this.broadcast(m.broadcast);
+    await this.syncRegistry(m.record);
+    const snap = m.record.snapshot;
+    if (!snap.players.some((p) => p.isHuman) && !snap.control.manualMode) {
+      await this.ctx.storage.setAlarm(Date.now() + 1);
+    }
+    return snap;
+  }
+
   async getSnapshot(): Promise<Snapshot | null> {
     const record = await this.ctx.storage.get<MatchRecord>("record");
     return record ? record.snapshot : null;

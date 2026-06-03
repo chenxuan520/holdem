@@ -8,6 +8,7 @@ import {
   fetchPresets,
   fetchRecords,
   fetchReplay,
+  fetchTournaments,
   probeInlinePreset,
   probePreset,
   submitAction,
@@ -25,6 +26,7 @@ import type {
   ReplayDetail,
   StreamEvent,
 } from './lib/types'
+import { ArenaView } from './pages/ArenaView'
 import { HistoryView } from './pages/HistoryView'
 import { LobbyView } from './pages/LobbyView'
 import { BackendConfigModal } from './components/BackendConfigModal'
@@ -35,7 +37,7 @@ const DEFAULT_CHIPS = 200
 const DEFAULT_SMALL_BLIND = 10
 const DEFAULT_BIG_BLIND = 20
 
-type View = 'lobby' | 'table' | 'history' | 'replay'
+type View = 'lobby' | 'table' | 'history' | 'replay' | 'arena'
 type SpectatorRunMode = 'semi' | 'auto' | 'manual'
 
 export default function App() {
@@ -60,6 +62,9 @@ export default function App() {
   const [actionPending, setActionPending] = useState(false)
   const [records, setRecords] = useState<RecordSummary[]>([])
   const [recordsLoading, setRecordsLoading] = useState(false)
+  // matchIds referenced by any tournament, so 牌桌记录 can filter 擂台桌 vs
+  // 自建桌 without a backend schema change (cross-referenced at load time).
+  const [tournamentMatchIds, setTournamentMatchIds] = useState<string[]>([])
   const [replay, setReplay] = useState<ReplayDetail | null>(null)
   const [replayLoading, setReplayLoading] = useState(false)
   const [deletingRecordID, setDeletingRecordID] = useState<string | null>(null)
@@ -233,7 +238,18 @@ export default function App() {
   async function loadRecords() {
     setRecordsLoading(true)
     try {
-      setRecords(await fetchRecords())
+      const [recs, tournaments] = await Promise.all([
+        fetchRecords(),
+        fetchTournaments().catch(() => []),
+      ])
+      setRecords(recs)
+      const ids: string[] = []
+      for (const tournament of tournaments) {
+        for (const match of tournament.matches ?? []) {
+          if (match.matchId) ids.push(match.matchId)
+        }
+      }
+      setTournamentMatchIds(ids)
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载记录失败')
     } finally {
@@ -457,6 +473,9 @@ export default function App() {
           <button className={`nav-pill ${view === 'history' ? 'active' : ''}`} onClick={() => setView('history')} type="button">
             牌桌记录
           </button>
+          <button className={`nav-pill ${view === 'arena' ? 'active' : ''}`} onClick={() => setView('arena')} type="button">
+            擂台排行
+          </button>
           <button className={`nav-pill ${view === 'replay' ? 'active' : ''}`} onClick={() => setView('replay')} type="button" disabled={!replay}>
             回放详情
           </button>
@@ -548,6 +567,7 @@ export default function App() {
         {view === 'history' ? (
           <HistoryView
             items={records}
+            tournamentMatchIds={tournamentMatchIds}
             loading={recordsLoading}
             deletingID={deletingRecordID}
             clearingAll={clearingRecords}
@@ -557,6 +577,8 @@ export default function App() {
             onClear={handleClearRecords}
           />
         ) : null}
+
+        {view === 'arena' ? <ArenaView presets={presets} onOpenReplay={openReplay} /> : null}
 
         {view === 'replay' ? <ReplayView replay={replay} loading={replayLoading} /> : null}
       </main>

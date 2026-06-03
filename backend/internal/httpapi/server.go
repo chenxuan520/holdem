@@ -49,6 +49,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/records/", s.handleRecordByID)
 	mux.HandleFunc("/api/replays", s.handleReplays)
 	mux.HandleFunc("/api/replays/", s.handleReplayByID)
+	mux.HandleFunc("/api/tournaments", s.handleTournaments)
+	mux.HandleFunc("/api/tournaments/", s.handleTournamentByID)
 
 	return withCORS(s.withAuth(mux))
 }
@@ -339,6 +341,87 @@ func (s *Server) handleReplayByID(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		writeMethodNotAllowed(w, strings.Join([]string{http.MethodGet, http.MethodDelete}, ", "))
+	}
+}
+
+func (s *Server) handleTournaments(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"tournaments": s.matches.ListTournaments()})
+	case http.MethodPost:
+		var cfg match.TournamentConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid json: %v", err))
+			return
+		}
+		detail, err := s.matches.CreateTournament(cfg)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusCreated, detail)
+	default:
+		writeMethodNotAllowed(w, strings.Join([]string{http.MethodGet, http.MethodPost}, ", "))
+	}
+}
+
+func (s *Server) handleTournamentByID(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/tournaments/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		writeError(w, http.StatusNotFound, "tournament not found")
+		return
+	}
+	id := parts[0]
+
+	if len(parts) == 1 {
+		switch r.Method {
+		case http.MethodGet:
+			detail, ok := s.matches.GetTournament(id)
+			if !ok {
+				writeError(w, http.StatusNotFound, "tournament not found")
+				return
+			}
+			writeJSON(w, http.StatusOK, detail)
+		case http.MethodDelete:
+			if err := s.matches.DeleteTournament(id); err != nil {
+				status := http.StatusInternalServerError
+				if strings.Contains(err.Error(), "not found") {
+					status = http.StatusNotFound
+				}
+				writeError(w, status, err.Error())
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			writeMethodNotAllowed(w, strings.Join([]string{http.MethodGet, http.MethodDelete}, ", "))
+		}
+		return
+	}
+
+	switch parts[1] {
+	case "control":
+		if r.Method != http.MethodPost {
+			writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		var req match.ControlRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid json: %v", err))
+			return
+		}
+		detail, err := s.matches.ControlTournament(id, req)
+		if err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "not found") {
+				status = http.StatusNotFound
+			}
+			writeError(w, status, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, detail)
+	default:
+		writeError(w, http.StatusNotFound, "tournament route not found")
 	}
 }
 

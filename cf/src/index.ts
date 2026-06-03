@@ -1,9 +1,10 @@
-import type { CreateRequest, FullPreset } from "./core";
+import type { CreateRequest, FullPreset, TournamentConfig } from "./core";
 import { publicPreset } from "./core";
 import type { Env } from "./env";
 
 export { MatchDO } from "./do/matchDO";
 export { RegistryDO } from "./do/registryDO";
+export { TournamentDO } from "./do/tournamentDO";
 
 // Worker entry: routes mirror backend/internal/httpapi/server.go one-for-one.
 // Match-scoped routes proxy to a MatchDO keyed by the match id (= DO name);
@@ -186,12 +187,64 @@ async function route(request: Request, env: Env, url: URL, path: string): Promis
   if (path === "/api/replays" || path.startsWith("/api/replays/")) {
     return handleReplays(request, env, path);
   }
+  if (path === "/api/tournaments" || path.startsWith("/api/tournaments/")) {
+    return handleTournaments(request, env, path);
+  }
 
   return errorResponse(404, "not found");
 }
 
 function registry(env: Env) {
   return env.REGISTRY_DO.getByName("registry");
+}
+
+function arena(env: Env) {
+  return env.TOURNAMENT_DO.getByName("arena");
+}
+
+async function handleTournaments(request: Request, env: Env, path: string): Promise<Response> {
+  const stub = arena(env);
+  if (path === "/api/tournaments") {
+    if (request.method === "GET") return json({ tournaments: await stub.list() });
+    if (request.method === "POST") {
+      const cfg = (await request.json()) as TournamentConfig;
+      // The arena DO needs the full presets (with tokens) to create matches;
+      // they live only in the arena's storage, never in any public response.
+      const detail = await stub.create(cfg, loadPresets(env));
+      return json(detail, 201);
+    }
+    return errorResponse(405, "method not allowed");
+  }
+
+  const rest = path.slice("/api/tournaments/".length);
+  const parts = rest.split("/").filter((p) => p.length > 0);
+  if (parts.length === 0) return errorResponse(404, "tournament not found");
+  const id = parts[0];
+
+  if (parts.length === 1) {
+    if (request.method === "GET") {
+      const detail = await stub.get(id);
+      if (!detail) return errorResponse(404, "tournament not found");
+      return json(detail);
+    }
+    if (request.method === "DELETE") {
+      const removed = await stub.remove(id);
+      if (!removed) return errorResponse(404, "tournament not found");
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+    return errorResponse(405, "method not allowed");
+  }
+
+  if (parts[1] === "control") {
+    if (request.method !== "POST") return errorResponse(405, "method not allowed");
+    const body = (await request.json()) as { action: string };
+    if (body.action !== "stop") return errorResponse(400, `unsupported tournament control action ${body.action}`);
+    const detail = await stub.stop(id);
+    if (!detail) return errorResponse(404, "tournament not found");
+    return json(detail);
+  }
+
+  return errorResponse(404, "tournament route not found");
 }
 
 async function handleRecords(request: Request, env: Env, path: string): Promise<Response> {

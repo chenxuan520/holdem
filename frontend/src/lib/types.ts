@@ -253,3 +253,60 @@ export type ReplayDetail = {
   aiLogs: AILog[]
   createdAt: string
 }
+
+// ---- AI 擂台 / 排行榜 (tournament) ----
+
+export type TournamentConfig = {
+  name: string
+  presetIds: string[]
+  // 0 -> 全员同桌 (min(pool, 6)); 2 -> heads-up; otherwise fixed multiway size.
+  tableSize: number
+  rounds: number
+  maxHandsPerMatch: number
+  initialChips: number
+  smallBlind: number
+  bigBlind: number
+  maxConcurrency: number
+  maxMatches: number
+  seed?: number
+}
+
+export type Standing = {
+  presetId: string
+  name: string
+  matches: number
+  wins: number
+  winRate: number
+  avgPlacement: number
+  rating: number
+  chipDelta: number
+  bb100: number
+  errorRate: number
+  avgAttempts: number
+}
+
+export type TournamentMatch = {
+  matchId?: string
+  round: number
+  presetIds: string[]
+  status: string // pending|running|finished|stopped|failed
+  winnerName?: string
+  handsPlayed?: number
+  error?: string
+}
+
+export type TournamentDetail = {
+  id: string
+  name: string
+  status: string // running|stopped|finished|interrupted
+  config: TournamentConfig
+  matches: TournamentMatch[]
+  standings: Standing[]
+  matchesTotal: number
+  matchesDone: number
+  decisions: number
+  error?: string
+  createdAt: string
+  updatedAt: string
+  finishedAt?: string
+}

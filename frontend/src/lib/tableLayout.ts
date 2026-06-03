@@ -6,11 +6,21 @@ export type SeatStyle = {
   bubbleDirection: BubbleDirection
 }
 
-// Seats are placed inside the felt with comfortable padding so that even the
-// leftmost/rightmost positions in 6-player layouts keep a full card body away
-// from the felt edge. Tighter than the bezel radius keeps the layout tidy.
+// Seats sit on an ellipse inside the felt. The board (5 community-card slots)
+// is wide and centered, so the danger zone is the upper-middle of the table:
+// in the 5-player layout the two upper seats land at a shallow angle (~23% from
+// the top) and, because the seat cards are a fixed ~150px tall, their bottom
+// edge used to drop right onto the community cards.
+//
+// Fix: give the upper half of the ellipse a larger vertical radius so those
+// seats ride higher, clear above the board. A floor (TOP_MIN) keeps a
+// top-center seat (2/4/6-player) from being lifted so far its fixed-height
+// card clips the felt's top edge. The bottom half keeps the original radius so
+// the hero seat stays comfortably inside the felt.
 const RADIUS_X = 36
-const RADIUS_Y = 33
+const RADIUS_Y_BOTTOM = 33
+const RADIUS_Y_TOP = 42
+const TOP_MIN = 17
 const CENTER_X = 50
 const CENTER_Y = 50
 const START_DEGREES = 90 // bottom-center is hero seat
@@ -23,14 +33,18 @@ export function seatLayout(count: number): SeatStyle[] {
     const angleDeg = START_DEGREES + step * i
     const angleRad = (angleDeg * Math.PI) / 180
     const sinValue = Math.sin(angleRad)
+    const isUpper = sinValue < 0
+    const radiusY = isUpper ? RADIUS_Y_TOP : RADIUS_Y_BOTTOM
     const x = CENTER_X + RADIUS_X * Math.cos(angleRad)
-    const y = CENTER_Y + RADIUS_Y * sinValue
+    let y = CENTER_Y + radiusY * sinValue
+    // Don't lift an upper seat so high the fixed-height card pokes out the top.
+    if (isUpper) y = Math.max(y, TOP_MIN)
     // Seats above the table center get bubbles that drop downward so they
     // never spill outside the table's top edge into the controls area.
     layouts.push({
       top: `${y}%`,
       left: `${x}%`,
-      bubbleDirection: sinValue < 0 ? 'down' : 'up',
+      bubbleDirection: isUpper ? 'down' : 'up',
     })
   }
   return layouts

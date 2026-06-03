@@ -23,6 +23,19 @@
 #                 and the parser fallback to extract `{ ... }` from content.
 #
 # When the field is omitted the backend uses tool_call.
+#
+# max_tokens (optional) overrides the per-attempt output ceiling. Reasoning
+# models stream a long chain-of-thought before the answer, so on the small
+# defaults the answer gets truncated to empty — give them a big value (e.g.
+# 4096). Non-reasoning models can leave it unset.
+#
+# extra_body (optional) is merged verbatim into the request body — an escape
+# hatch for provider-specific params. Example: turn OFF DeepSeek V4's default
+# thinking (cheaper + faster, no chain-of-thought, and a small max_tokens is
+# then enough) instead of paying for a big reasoning budget:
+#   extra_body:
+#     thinking:
+#       type: disabled
 presets:
   - id: tight-shark
     name: Benchmark A

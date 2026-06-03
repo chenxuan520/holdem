@@ -32,6 +32,7 @@ type Props = {
   onProbeAll?: () => void
   onSaveCustomPreset?: (entry: CustomPresetEntry) => void
   onDeleteCustomPreset?: (id: string) => void
+  onConfigureBackend?: () => void
 }
 
 export function LobbyView({
@@ -64,6 +65,7 @@ export function LobbyView({
   onProbeAll,
   onSaveCustomPreset,
   onDeleteCustomPreset,
+  onConfigureBackend,
 }: Props) {
   // Custom presets live entirely client-side. The lobby shows them inline
   // alongside backend-loaded presets in seat dropdowns and as preset cards;
@@ -107,7 +109,9 @@ export function LobbyView({
         <div className="hero-grid">
           <div>
             <span className="eyebrow">Holdem AI Battle</span>
-            <h1>德州扑克 AI 牌桌</h1>
+            <h1 className="title-configurable" title="双击设置后端地址" onDoubleClick={onConfigureBackend}>
+              德州扑克 AI 牌桌
+            </h1>
             <p>直接建桌、实时查看牌局进展、赛后回看记录，并查看每次 AI 决策日志。</p>
 
             <div className="hero-metrics">

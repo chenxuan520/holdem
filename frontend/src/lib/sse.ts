@@ -1,4 +1,5 @@
 import { authQueryParam, clearStoredPassword } from './auth'
+import { apiUrl } from './apiBase'
 import type { StreamEvent } from './types'
 
 export function subscribeMatchStream(
@@ -11,8 +12,8 @@ export function subscribeMatchStream(
   // for LAN-tier protection — the token would be visible in browser /
   // server access logs but never leaves the user's network.
   const token = authQueryParam()
-  const url = token ? `/api/matches/${matchID}/stream?${token}` : `/api/matches/${matchID}/stream`
-  const source = new EventSource(url)
+  const path = token ? `/api/matches/${matchID}/stream?${token}` : `/api/matches/${matchID}/stream`
+  const source = new EventSource(apiUrl(path))
 
   source.addEventListener('connected', () => {
     onStatus?.('connected')
@@ -42,7 +43,7 @@ export function subscribeMatchStream(
     if (typeof window !== 'undefined' && source.readyState === EventSource.CLOSED) {
       // best-effort: probe /api/auth/check; if 401, lib/api will fire
       // the holdem:auth-required event and clear the password.
-      fetch('/api/auth/check', { headers: token ? { 'X-Holdem-Password': decodeURIComponent(token.slice('token='.length)) } : {} })
+      fetch(apiUrl('/api/auth/check'), { headers: token ? { 'X-Holdem-Password': decodeURIComponent(token.slice('token='.length)) } : {} })
         .then((res) => {
           if (res.status === 401) {
             clearStoredPassword()

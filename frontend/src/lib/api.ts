@@ -1,4 +1,5 @@
 import { authHeaders, clearStoredPassword } from './auth'
+import { apiUrl } from './apiBase'
 import type {
   CreateMatchPayload,
   InlinePresetConfig,
@@ -30,7 +31,7 @@ async function authedFetch(input: string, init: RequestInit = {}): Promise<Respo
   for (const [key, value] of Object.entries(authHeaders())) {
     headers.set(key, value)
   }
-  const response = await fetch(input, { ...init, headers })
+  const response = await fetch(apiUrl(input), { ...init, headers })
   if (response.status === 401) {
     clearStoredPassword()
     // Notify any AuthGate listening for this so it can immediately swap

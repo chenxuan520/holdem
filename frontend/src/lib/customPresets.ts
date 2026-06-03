@@ -52,6 +52,10 @@ export function extractInlineConfig(entry: CustomPresetEntry): InlinePresetConfi
     model: entry.model,
     systemPrompt: entry.systemPrompt,
     structuredOutput: entry.structuredOutput,
+    // Undefined fields are dropped by JSON.stringify, so the backend's
+    // optional maxTokens / extraBody simply stay absent when unused.
+    maxTokens: entry.maxTokens,
+    extraBody: entry.extraBody,
   }
 }
 
@@ -66,5 +70,11 @@ function coerceEntry(value: unknown): CustomPresetEntry | null {
   if (!id || !name || !endpoint || !token || !model) return null
   const systemPrompt = typeof v.systemPrompt === 'string' ? v.systemPrompt : ''
   const so = typeof v.structuredOutput === 'string' ? (v.structuredOutput as StructuredOutputMode) : undefined
-  return { id, name, endpoint, token, model, systemPrompt, structuredOutput: so }
+  const maxTokens =
+    typeof v.maxTokens === 'number' && Number.isFinite(v.maxTokens) && v.maxTokens > 0 ? v.maxTokens : undefined
+  const extraBody =
+    v.extraBody && typeof v.extraBody === 'object' && !Array.isArray(v.extraBody)
+      ? (v.extraBody as Record<string, unknown>)
+      : undefined
+  return { id, name, endpoint, token, model, systemPrompt, structuredOutput: so, maxTokens, extraBody }
 }

@@ -27,6 +27,13 @@ export function CustomPresetForm({ initial, onSubmit, onCancel, onDelete }: Prop
     initial?.structuredOutput ?? 'tool_call',
   )
   const [systemPrompt, setSystemPrompt] = useState(initial?.systemPrompt ?? '')
+  // Advanced (optional) knobs. Start expanded only when the entry already uses
+  // them, so the common case stays uncluttered.
+  const [maxTokens, setMaxTokens] = useState(initial?.maxTokens ? String(initial.maxTokens) : '')
+  const [extraBodyText, setExtraBodyText] = useState(
+    initial?.extraBody ? JSON.stringify(initial.extraBody, null, 2) : '',
+  )
+  const [advancedOpen, setAdvancedOpen] = useState(Boolean(initial?.maxTokens || initial?.extraBody))
   const [probing, setProbing] = useState(false)
   const [probeResult, setProbeResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -37,25 +44,63 @@ export function CustomPresetForm({ initial, onSubmit, onCancel, onDelete }: Prop
   const trimmedModel = model.trim()
   const canSubmit = trimmedName !== '' && trimmedEndpoint !== '' && trimmedToken !== '' && trimmedModel !== ''
 
+  // buildEntry validates the advanced fields and assembles the entry, or
+  // returns a human-readable error. Shared by submit and the connectivity
+  // probe so the two paths never disagree about what counts as valid.
+  function buildEntry(): { entry: CustomPresetEntry } | { error: string } {
+    if (!canSubmit) {
+      return { error: '请补全名称 / endpoint / token / model 四个必填字段。' }
+    }
+    let maxTokensValue: number | undefined
+    const mt = maxTokens.trim()
+    if (mt !== '') {
+      const n = Number(mt)
+      if (!Number.isInteger(n) || n <= 0) {
+        return { error: 'max_tokens 必须是正整数（留空则用后端默认）。' }
+      }
+      maxTokensValue = n
+    }
+    let extraBodyValue: Record<string, unknown> | undefined
+    const eb = extraBodyText.trim()
+    if (eb !== '') {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(eb)
+      } catch {
+        return { error: 'extra_body 不是合法 JSON。' }
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return { error: 'extra_body 必须是一个 JSON 对象，例如 {"thinking":{"type":"disabled"}}。' }
+      }
+      extraBodyValue = parsed as Record<string, unknown>
+    }
+    return {
+      entry: {
+        id: initial?.id ?? makeCustomPresetId(),
+        name: trimmedName,
+        endpoint: trimmedEndpoint,
+        token: trimmedToken,
+        model: trimmedModel,
+        structuredOutput,
+        systemPrompt: systemPrompt.trim(),
+        maxTokens: maxTokensValue,
+        extraBody: extraBodyValue,
+      },
+    }
+  }
+
   return (
     <form
       className="custom-preset-form"
       onSubmit={(event) => {
         event.preventDefault()
-        if (!canSubmit) {
-          setError('请补全名称 / endpoint / token / model 四个必填字段。')
+        const result = buildEntry()
+        if ('error' in result) {
+          setError(result.error)
           return
         }
-        const entry: CustomPresetEntry = {
-          id: initial?.id ?? makeCustomPresetId(),
-          name: trimmedName,
-          endpoint: trimmedEndpoint,
-          token: trimmedToken,
-          model: trimmedModel,
-          structuredOutput,
-          systemPrompt: systemPrompt.trim(),
-        }
-        onSubmit(entry)
+        setError(null)
+        onSubmit(result.entry)
       }}
     >
       <div className="custom-preset-form-head">
@@ -134,6 +179,36 @@ export function CustomPresetForm({ initial, onSubmit, onCancel, onDelete }: Prop
         </label>
       </div>
 
+      <div className="custom-preset-form-advanced">
+        <button type="button" className="ghost-button compact" onClick={() => setAdvancedOpen((v) => !v)}>
+          {advancedOpen ? '收起高级（可选）' : '展开高级（可选）'}
+        </button>
+        {advancedOpen ? (
+          <div className="custom-preset-form-grid">
+            <label>
+              <span>max_tokens（可选）</span>
+              <input
+                type="number"
+                min={1}
+                value={maxTokens}
+                onChange={(e) => setMaxTokens(e.target.value)}
+                placeholder="推理模型建议 4096；留空用默认"
+              />
+            </label>
+            <label className="custom-preset-form-wide">
+              <span>extra_body（可选，JSON 对象，原样并入请求体）</span>
+              <textarea
+                value={extraBodyText}
+                onChange={(e) => setExtraBodyText(e.target.value)}
+                rows={4}
+                spellCheck={false}
+                placeholder={'厂商私有参数。例如关掉 DeepSeek 思考：\n{"thinking": {"type": "disabled"}}'}
+              />
+            </label>
+          </div>
+        ) : null}
+      </div>
+
       {error ? <p className="error-text">{error}</p> : null}
       {probeResult ? (
         <p className={`probe-summary ${probeResult.ok ? 'ok' : 'error'}`}>{probeResult.message}</p>
@@ -145,31 +220,23 @@ export function CustomPresetForm({ initial, onSubmit, onCancel, onDelete }: Prop
           className="ghost-button"
           disabled={!canSubmit || probing}
           onClick={async () => {
+            const result = buildEntry()
+            if ('error' in result) {
+              setError(result.error)
+              return
+            }
             setError(null)
             setProbing(true)
             setProbeResult(null)
             try {
-              const result = await probeInlinePreset(
-                extractInlineConfig({
-                  id: initial?.id ?? makeCustomPresetId(),
-                  name: trimmedName,
-                  endpoint: trimmedEndpoint,
-                  token: trimmedToken,
-                  model: trimmedModel,
-                  structuredOutput,
-                  systemPrompt: systemPrompt.trim(),
-                }),
-              )
-              if (result.ok) {
+              const r = await probeInlinePreset(extractInlineConfig(result.entry))
+              if (r.ok) {
                 setProbeResult({
                   ok: true,
-                  message: `连通正常 · ${result.latencyMs}ms${result.model ? ` · ${result.model}` : ''}`,
+                  message: `连通正常 · ${r.latencyMs}ms${r.model ? ` · ${r.model}` : ''}`,
                 })
               } else {
-                setProbeResult({
-                  ok: false,
-                  message: `连通失败：${result.error || '未知错误'}`,
-                })
+                setProbeResult({ ok: false, message: `连通失败：${r.error || '未知错误'}` })
               }
             } catch (err) {
               setProbeResult({

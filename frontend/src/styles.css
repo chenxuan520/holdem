@@ -1169,6 +1169,17 @@ select {
   grid-column: 1 / -1;
 }
 
+.custom-preset-form-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.custom-preset-form-advanced > button {
+  align-self: flex-start;
+}
+
 .custom-preset-form-actions {
   display: flex;
   align-items: center;
@@ -2950,4 +2961,101 @@ select {
 	.poker-card-hero .poker-card-pip {
 		font-size: 28px;
 	}
+}
+
+/* === BACKEND CONFIG MODAL (double-click the title) === */
+
+.title-configurable {
+  cursor: pointer;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(4, 8, 18, 0.66);
+  backdrop-filter: blur(6px);
+  z-index: 9998;
+}
+
+.modal-card {
+  width: min(520px, 100%);
+  border-radius: 22px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal-head strong {
+  font-size: 18px;
+}
+
+.modal-desc {
+  margin: 0;
+  color: #9fb3d3;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.modal-desc code,
+.modal-current code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #cfe0ff;
+  font-size: 12px;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: #a5b7d5;
+}
+
+.modal-field input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(125, 158, 211, 0.32);
+  background: rgba(8, 14, 30, 0.7);
+  color: #e6ecff;
+  font-size: 14px;
+  outline: none;
+}
+
+.modal-field input:focus {
+  border-color: rgba(115, 201, 255, 0.8);
+  box-shadow: 0 0 0 4px rgba(80, 161, 255, 0.16);
+}
+
+.modal-presets {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.modal-current {
+  margin: 0;
+  font-size: 12px;
+  color: #8fa4c9;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
 }

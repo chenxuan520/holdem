@@ -93,3 +93,41 @@ func TestSystemInstructionPrependsPresetPromptWhenSet(t *testing.T) {
 		t.Fatalf("expected preset system_prompt to be prepended, got: %s", out)
 	}
 }
+
+func TestBuildRequestPayloadHonorsPresetMaxTokens(t *testing.T) {
+	// A reasoning preset with an explicit ceiling overrides the small default
+	// on every attempt so its chain-of-thought has room before the answer.
+	preset := config.Preset{Model: "deepseek-v4-pro", StructuredOutput: config.StructuredOutputJSONObject, MaxTokens: 4096}
+	for _, attempt := range []int{1, 2, 3} {
+		payload := buildRequestPayload(preset, PromptInput{}, attempt, "")
+		if payload["max_tokens"] != 4096 {
+			t.Fatalf("attempt %d: expected preset max_tokens 4096, got %v", attempt, payload["max_tokens"])
+		}
+	}
+
+	// Presets without an override keep the cheap per-attempt defaults.
+	def := buildRequestPayload(config.Preset{Model: "gpt-5.4"}, PromptInput{}, 1, "")
+	if def["max_tokens"] != 192 {
+		t.Fatalf("expected default attempt-1 max_tokens 192, got %v", def["max_tokens"])
+	}
+}
+
+func TestBuildRequestPayloadMergesExtraBody(t *testing.T) {
+	preset := config.Preset{
+		Model:            "deepseek-v4-pro",
+		StructuredOutput: config.StructuredOutputToolCall,
+		ExtraBody:        map[string]any{"thinking": map[string]any{"type": "disabled"}},
+	}
+	payload := buildRequestPayload(preset, PromptInput{}, 1, "")
+	thinking, ok := payload["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("expected extra_body thinking passthrough, got %v", payload["thinking"])
+	}
+	// The merge must not clobber the core request fields.
+	if payload["model"] != "deepseek-v4-pro" {
+		t.Fatalf("extra_body merge clobbered model: %v", payload["model"])
+	}
+	if _, ok := payload["messages"]; !ok {
+		t.Fatalf("extra_body merge dropped messages")
+	}
+}

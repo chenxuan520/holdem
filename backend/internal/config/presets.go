@@ -30,6 +30,17 @@ type Preset struct {
 	Model            string `yaml:"model" json:"model"`
 	SystemPrompt     string `yaml:"system_prompt" json:"systemPrompt"`
 	StructuredOutput string `yaml:"structured_output,omitempty" json:"structuredOutput,omitempty"`
+	// MaxTokens overrides the per-attempt output-token ceiling. Reasoning
+	// models emit a long chain-of-thought before the answer, so the small
+	// defaults get exhausted mid-reasoning and the answer content comes back
+	// empty. 0 = use the built-in per-attempt defaults.
+	MaxTokens int `yaml:"max_tokens,omitempty" json:"maxTokens,omitempty"`
+	// ExtraBody is merged verbatim into the chat-completions request body — an
+	// escape hatch for provider-specific knobs the common path doesn't model,
+	// e.g. DeepSeek V4's `thinking: {type: disabled}` to turn off the
+	// chain-of-thought, or `reasoning_effort`. Keys here override the defaults,
+	// so use it for request params only — never messages / model.
+	ExtraBody map[string]any `yaml:"extra_body,omitempty" json:"-"`
 }
 
 type PublicPreset struct {
@@ -131,7 +142,9 @@ type InlinePresetInput struct {
 	Token            string `json:"token"`
 	Model            string `json:"model"`
 	SystemPrompt     string `json:"systemPrompt"`
-	StructuredOutput string `json:"structuredOutput"`
+	StructuredOutput string         `json:"structuredOutput"`
+	MaxTokens        int            `json:"maxTokens"`
+	ExtraBody        map[string]any `json:"extraBody,omitempty"`
 }
 
 // ToPreset converts the inbound input into the internal Preset shape;
@@ -145,6 +158,8 @@ func (in InlinePresetInput) ToPreset() Preset {
 		Model:            in.Model,
 		SystemPrompt:     in.SystemPrompt,
 		StructuredOutput: in.StructuredOutput,
+		MaxTokens:        in.MaxTokens,
+		ExtraBody:        in.ExtraBody,
 	}
 }
 

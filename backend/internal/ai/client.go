@@ -231,7 +231,7 @@ func buildRequestPayload(preset config.Preset, input PromptInput, attempt int, l
 	payload := map[string]any{
 		"model":       preset.Model,
 		"temperature": 0.1,
-		"max_tokens":  maxTokensForAttempt(attempt),
+		"max_tokens":  maxTokensFor(preset, attempt),
 		"messages":    messages,
 	}
 	switch mode {
@@ -241,6 +241,12 @@ func buildRequestPayload(preset config.Preset, input PromptInput, attempt int, l
 		payload["response_format"] = map[string]string{"type": "json_object"}
 	case config.StructuredOutputNone:
 		// Rely on prompt + parser fallback only.
+	}
+	// Provider-specific passthrough, merged last so an operator can layer
+	// vendor knobs on top of the common request (e.g. DeepSeek's thinking
+	// toggle). Intended for request params only — not messages / model.
+	for k, v := range preset.ExtraBody {
+		payload[k] = v
 	}
 	return payload
 }
@@ -257,6 +263,18 @@ func maxTokensForAttempt(attempt int) int {
 	default:
 		return 384
 	}
+}
+
+// maxTokensFor lets a preset override the default ceiling. Reasoning models
+// (e.g. deepseek-v4-pro) emit a long reasoning_content before the JSON answer;
+// on the tiny defaults the budget is exhausted mid-reasoning, leaving empty
+// content and a failed parse. Such presets set max_tokens explicitly in their
+// config; everyone else keeps the cheap per-attempt defaults.
+func maxTokensFor(preset config.Preset, attempt int) int {
+	if preset.MaxTokens > 0 {
+		return preset.MaxTokens
+	}
+	return maxTokensForAttempt(attempt)
 }
 
 func summarizeAttemptErrors(attempts []AttemptLog) string {

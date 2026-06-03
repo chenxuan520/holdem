@@ -128,6 +128,12 @@ export type InlinePresetConfig = {
   model: string
   systemPrompt?: string
   structuredOutput?: StructuredOutputMode
+  // Optional advanced knobs (lobby "自定义模型" 高级区). maxTokens lifts the
+  // output ceiling for reasoning models; extraBody is merged verbatim into the
+  // request body for provider-specific params, e.g. DeepSeek's
+  // {"thinking":{"type":"disabled"}} to turn off the chain-of-thought.
+  maxTokens?: number
+  extraBody?: Record<string, unknown>
 }
 
 // CustomPresetEntry pairs a frontend-only id with the user-typed config so

@@ -7,6 +7,8 @@
 // protection layer to prevent strangers from spending the operator's AI
 // tokens, not a full auth system.
 
+import { apiUrl } from './apiBase'
+
 const STORAGE_KEY = 'holdem.password'
 
 export type AuthCheckResult = {
@@ -67,7 +69,7 @@ export async function checkAuth(passwordOverride?: string): Promise<AuthCheckRes
   if (pw) headers['X-Holdem-Password'] = pw
 
   try {
-    const response = await fetch('/api/auth/check', { headers })
+    const response = await fetch(apiUrl('/api/auth/check'), { headers })
     const body = (await response.json().catch(() => null)) as
       | { ok?: boolean; authRequired?: boolean; error?: string }
       | null

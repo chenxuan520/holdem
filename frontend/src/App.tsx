@@ -27,6 +27,7 @@ import type {
 } from './lib/types'
 import { HistoryView } from './pages/HistoryView'
 import { LobbyView } from './pages/LobbyView'
+import { BackendConfigModal } from './components/BackendConfigModal'
 import { ReplayView } from './pages/ReplayView'
 import { TableView } from './pages/TableView'
 
@@ -39,6 +40,7 @@ type SpectatorRunMode = 'semi' | 'auto' | 'manual'
 
 export default function App() {
   const [view, setView] = useState<View>('lobby')
+  const [backendConfigOpen, setBackendConfigOpen] = useState(false)
   const [presets, setPresets] = useState<Preset[]>([])
   const [selectedAI, setSelectedAI] = useState<string[]>([])
   const [aiPlayerNames, setAIPlayerNames] = useState<string[]>([])
@@ -435,7 +437,13 @@ export default function App() {
           <div className="brand-lockup">
             <div className="brand-mark">♠</div>
             <div>
-              <strong>Holdem AI Battle</strong>
+              <strong
+                className="title-configurable"
+                title="双击设置后端地址"
+                onDoubleClick={() => setBackendConfigOpen(true)}
+              >
+                Holdem AI Battle
+              </strong>
               <span>对战 · 观战 · 回放</span>
             </div>
           </div>
@@ -531,6 +539,7 @@ export default function App() {
             onProbeAll={handleProbeAll}
             onSaveCustomPreset={handleSaveCustomPreset}
             onDeleteCustomPreset={handleDeleteCustomPreset}
+            onConfigureBackend={() => setBackendConfigOpen(true)}
           />
         ) : null}
 
@@ -551,6 +560,8 @@ export default function App() {
 
         {view === 'replay' ? <ReplayView replay={replay} loading={replayLoading} /> : null}
       </main>
+
+      <BackendConfigModal open={backendConfigOpen} onClose={() => setBackendConfigOpen(false)} />
     </div>
   )
 }

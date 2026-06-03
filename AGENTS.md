@@ -26,6 +26,22 @@
 - 前端测试：`cd frontend && npm run test`
 - 前端构建：`cd frontend && npm run build`
 
+## 重启后端 / 杀进程（别误杀前端）
+
+改了 `config/ai-presets.yaml` 后端要重启才生效（presets 只在启动时读一次）。重启
+时杀旧进程**必须只杀监听者**：
+
+- ✅ 正确：`lsof -ti:18130 -sTCP:LISTEN | xargs kill`
+- ❌ 禁止：`lsof -ti:18130 | xargs kill`（漏了 `-sTCP:LISTEN`）
+
+不带 `-sTCP:LISTEN` 的 `lsof -ti:18130` 会列出**所有跟 18130 有连接的进程**，不只是
+后端本身——尤其是 vite dev server（它代理 `/api` 并对后端保持 SSE 长连接），于是会
+被一起 `kill`，前端就莫名其妙地没了（终端日志 `exit_code: 143` = SIGTERM）。这个坑
+真踩过。规则对任何端口都适用：**只杀 LISTEN 的那个进程**。
+
+- 杀完先确认端口释放再重启：`lsof -ti:18130 -sTCP:LISTEN || echo free`
+- 别用 `pkill` / `killall` + 模糊匹配去杀后端，容易扫到无关进程。
+
 ## 访问控制（前端密码保护）
 
 后端默认**没有**密码保护，本地 dev 直接打开即可。但如果你把这台机器暴露给局

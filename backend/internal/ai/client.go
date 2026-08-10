@@ -169,8 +169,7 @@ func (c *Client) decideOnce(ctx context.Context, preset config.Preset, requestPa
 	if err != nil {
 		return Decision{}, RawLog{RequestPayload: requestPayload, Error: err.Error()}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+preset.Token)
-	req.Header.Set("Content-Type", "application/json")
+	applyRequestHeaders(req, preset)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -191,10 +190,7 @@ func (c *Client) decideOnce(ctx context.Context, preset config.Preset, requestPa
 
 	var completion struct {
 		Choices []struct {
-			Message struct {
-				Content   string     `json:"content"`
-				ToolCalls []ToolCall `json:"tool_calls"`
-			} `json:"message"`
+			Message completionMessage `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(rawBody, &completion); err != nil {
@@ -206,7 +202,7 @@ func (c *Client) decideOnce(ctx context.Context, preset config.Preset, requestPa
 		return Decision{}, log, fmt.Errorf("empty ai response")
 	}
 
-	decision, err := parseDecisionResponse(completion.Choices[0].Message.Content, completion.Choices[0].Message.ToolCalls)
+	decision, err := parseDecisionResponse(completion.Choices[0].Message.Content.String(), completion.Choices[0].Message.ToolCalls)
 	if err != nil {
 		log.Error = err.Error()
 		return Decision{}, log, err
@@ -244,11 +240,58 @@ func buildRequestPayload(preset config.Preset, input PromptInput, attempt int, l
 	}
 	// Provider-specific passthrough, merged last so an operator can layer
 	// vendor knobs on top of the common request (e.g. DeepSeek's thinking
-	// toggle). Intended for request params only — not messages / model.
-	for k, v := range preset.ExtraBody {
+	// toggle). A nil value deletes one of the defaults (for providers that
+	// reject fields like temperature entirely). Intended for request params
+	// only — not messages / model.
+	mergeExtraBody(payload, preset.ExtraBody)
+	return payload
+}
+
+func buildProbePayload(preset config.Preset) map[string]any {
+	maxTokens := 16
+	if preset.MaxTokens > maxTokens {
+		maxTokens = preset.MaxTokens
+		if maxTokens > 128 {
+			maxTokens = 128
+		}
+	}
+	payload := map[string]any{
+		"model":      preset.Model,
+		"max_tokens": maxTokens,
+		"messages": []map[string]string{
+			{"role": "user", "content": "Reply with exactly pong."},
+		},
+	}
+	mergeExtraBody(payload, preset.ExtraBody)
+	return payload
+}
+
+func mergeExtraBody(payload map[string]any, extra map[string]any) {
+	for k, v := range extra {
+		if v == nil {
+			delete(payload, k)
+			continue
+		}
 		payload[k] = v
 	}
-	return payload
+}
+
+func applyRequestHeaders(req *http.Request, preset config.Preset) {
+	req.Header.Set("Authorization", "Bearer "+preset.Token)
+	req.Header.Set("Content-Type", "application/json")
+	for key, value := range preset.ExtraHeaders {
+		name := strings.TrimSpace(key)
+		trimmed := strings.TrimSpace(value)
+		if name == "" || trimmed == "" {
+			continue
+		}
+		switch strings.ToLower(name) {
+		case "authorization", "content-type":
+			continue
+		default:
+			req.Header.Set(name, trimmed)
+		}
+	}
 }
 
 func maxTokensForAttempt(attempt int) int {
@@ -346,24 +389,16 @@ func mustJSON(value any) string {
 	return string(data)
 }
 
-// Probe sends an ultra-cheap chat completion (~5 input + ~4 output tokens)
-// to verify the endpoint, token and model actually answer. It does NOT
-// exercise the structured-output path; the real match flow already retries
-// with fallbacks if structured output misbehaves, so the probe focuses on
-// the cheaper "is the model reachable" check.
+// Probe sends an ultra-cheap chat completion to verify the endpoint, token and
+// model actually answer. It keeps the payload tiny, but still respects
+// provider-specific compatibility knobs like extra_body / extra_headers so the
+// result is less prone to false negatives than a totally generic ping.
 func (c *Client) Probe(ctx context.Context, preset config.Preset) ProbeResult {
 	if strings.Contains(preset.Token, "replace-with-your-token") {
 		return ProbeResult{OK: false, Error: "preset still uses placeholder token"}
 	}
 
-	payload := map[string]any{
-		"model":       preset.Model,
-		"temperature": 0,
-		"max_tokens":  16,
-		"messages": []map[string]string{
-			{"role": "user", "content": "ping"},
-		},
-	}
+	payload := buildProbePayload(preset)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return ProbeResult{OK: false, Error: err.Error()}
@@ -374,8 +409,7 @@ func (c *Client) Probe(ctx context.Context, preset config.Preset) ProbeResult {
 	if err != nil {
 		return ProbeResult{OK: false, Error: err.Error()}
 	}
-	req.Header.Set("Authorization", "Bearer "+preset.Token)
-	req.Header.Set("Content-Type", "application/json")
+	applyRequestHeaders(req, preset)
 
 	start := time.Now()
 	resp, err := c.httpClient.Do(req)
@@ -405,9 +439,7 @@ func (c *Client) Probe(ctx context.Context, preset config.Preset) ProbeResult {
 	var completion struct {
 		Model   string `json:"model"`
 		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
+			Message completionMessage `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(rawBody, &completion); err != nil {
@@ -416,7 +448,7 @@ func (c *Client) Probe(ctx context.Context, preset config.Preset) ProbeResult {
 
 	snippet := ""
 	if len(completion.Choices) > 0 {
-		snippet = strings.TrimSpace(completion.Choices[0].Message.Content)
+		snippet = strings.TrimSpace(completion.Choices[0].Message.Content.String())
 	}
 	if len(snippet) > 80 {
 		snippet = snippet[:80] + "..."

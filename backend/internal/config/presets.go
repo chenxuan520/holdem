@@ -27,6 +27,10 @@ type Preset struct {
 	Name             string `yaml:"name" json:"name"`
 	Endpoint         string `yaml:"endpoint" json:"endpoint"`
 	Token            string `yaml:"token" json:"-"`
+	// ExtraHeaders are merged into every outbound HTTP request for this preset.
+	// Intended for non-auth gateway metadata only, e.g. TTADK/llmbox's
+	// `X-Source: ttadk` header that unlocks certain routed models.
+	ExtraHeaders     map[string]string `yaml:"extra_headers,omitempty" json:"-"`
 	Model            string `yaml:"model" json:"model"`
 	SystemPrompt     string `yaml:"system_prompt" json:"systemPrompt"`
 	StructuredOutput string `yaml:"structured_output,omitempty" json:"structuredOutput,omitempty"`

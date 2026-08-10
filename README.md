@@ -113,6 +113,34 @@ header（SSE 因为 EventSource 不能加自定义 header，额外接受 `?token
 > **不要**把密码写到 `config/app.json` 的 `auth.password` 字段——那个文件被
 > git 跟踪，env var 才是干净的本机配置方式。
 
+### 命令行运行 AI 擂台
+
+后端启动后，可以完全不打开网页，直接创建擂台、等待比赛结束并在终端查看排行榜：
+
+```bash
+cd backend
+
+# 只比较指定的服务端预设
+go run ./cmd/arena --rounds 3 tight-shark balanced-pro
+
+# 不传 preset id 时，自动选择后端返回的全部内置预设
+go run ./cmd/arena --rounds 3
+```
+
+常用参数包括 `--table-size`、`--max-hands`、`--concurrency`、`--max-matches`、
+`--seed`；完整列表用 `go run ./cmd/arena --help` 查看。默认每 3 秒轮询一次，赛事
+结束后打印夺冠率、Elo、平均名次、bb/100、净筹码和出错率；只创建、不等待可传
+`--wait=false`。等待模式下按 Ctrl-C 或轮询失败会主动停止该擂台，避免终端退出
+后赛事继续消耗 token；需要让它脱离 CLI 在后端继续跑时，应显式使用
+`--wait=false`。
+
+CLI 默认连接 `http://127.0.0.1:18130`。可用 `--api https://...` 或
+`HOLDEM_API_URL` 指向 Cloudflare 后端；服务启用了访问密码时，为 CLI 设置同一个
+`HOLDEM_AUTH_PASSWORD`。命令会调用现有 `/api/tournaments`，所以仍受后端的并发、
+手数和总场次数上限保护。使用外部 endpoint 会产生真实 AI 费用，运行全部预设前请
+先确认参赛池和轮数。若创建请求超时且未能取得赛事 ID，CLI 会提示创建结果未知；
+此时应先查看赛事列表，不要直接重试，以免重复创建。
+
 ### 不改 yaml 加新模型（lobby 自定义模型）
 
 Lobby 右下「+ 添加自定义模型」面板填表即可，表单里有「检测连通性」按钮，开局
@@ -133,6 +161,7 @@ Lobby 右下「+ 添加自定义模型」面板填表即可，表单里有「检
 
 ```
 backend/                Go 后端
+  cmd/arena/              命令行创建擂台并输出排行榜
   cmd/server/             入口
   internal/ai/            OpenAI 兼容 client + 重试 + 结构化输出三档分支
   internal/match/         规则引擎、状态机、回放、自动观战、SQLite 持久化

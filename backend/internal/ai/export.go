@@ -28,10 +28,7 @@ func BuildRequestBody(preset config.Preset, input PromptInput, attempt int, last
 func ParseResponseBody(rawBody string) (Decision, error) {
 	var completion struct {
 		Choices []struct {
-			Message struct {
-				Content   string     `json:"content"`
-				ToolCalls []ToolCall `json:"tool_calls"`
-			} `json:"message"`
+			Message completionMessage `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal([]byte(rawBody), &completion); err != nil {
@@ -40,7 +37,7 @@ func ParseResponseBody(rawBody string) (Decision, error) {
 	if len(completion.Choices) == 0 {
 		return Decision{}, fmt.Errorf("empty ai response")
 	}
-	return parseDecisionResponse(completion.Choices[0].Message.Content, completion.Choices[0].Message.ToolCalls)
+	return parseDecisionResponse(completion.Choices[0].Message.Content.String(), completion.Choices[0].Message.ToolCalls)
 }
 
 // RetryHint exposes retryHintFromError so the CF retry loop can compose the

@@ -17,6 +17,50 @@ type ToolFunction struct {
 	Arguments string `json:"arguments"`
 }
 
+type completionMessage struct {
+	Content   completionContent `json:"content"`
+	ToolCalls []ToolCall        `json:"tool_calls"`
+}
+
+// completionContent accepts both the standard string-shaped OpenAI content and
+// provider adapters that return an array of typed blocks. We keep only `text`
+// blocks and ignore `thinking` blocks so the downstream JSON parser sees the
+// final answer instead of an intermediate reasoning trace.
+type completionContent string
+
+func (c completionContent) String() string {
+	return string(c)
+}
+
+func (c *completionContent) UnmarshalJSON(data []byte) error {
+	var plain string
+	if err := json.Unmarshal(data, &plain); err == nil {
+		*c = completionContent(plain)
+		return nil
+	}
+
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(data, &blocks); err == nil {
+		parts := make([]string, 0, len(blocks))
+		for _, block := range blocks {
+			if strings.TrimSpace(block.Text) == "" {
+				continue
+			}
+			if block.Type != "" && block.Type != "text" {
+				continue
+			}
+			parts = append(parts, block.Text)
+		}
+		*c = completionContent(strings.Join(parts, "\n"))
+		return nil
+	}
+
+	return fmt.Errorf("unsupported completion content shape")
+}
+
 func parseDecisionResponse(content string, toolCalls []ToolCall) (Decision, error) {
 	for _, toolCall := range toolCalls {
 		if strings.TrimSpace(toolCall.Function.Name) != "submit_action" {

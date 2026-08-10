@@ -45,3 +45,28 @@ func TestClientDecideRetriesUntilSuccess(t *testing.T) {
 		t.Fatalf("expected 3 attempt logs, got %d", len(log.Attempts))
 	}
 }
+
+func TestClientDecideSendsExtraHeadersAndParsesArrayContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Source"); got != "ttadk" {
+			t.Fatalf("expected X-Source header ttadk, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":[{"type":"thinking","text":""},{"type":"text","text":"{\"action\":\"fold\",\"amount\":0,\"public_reason\":\"稳健\",\"private_reason\":\"没优势\"}"}]}}]}`)
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	decision, _, err := client.Decide(context.Background(), config.Preset{
+		Endpoint:     server.URL,
+		Token:        "test-token",
+		Model:        "glm-5.1",
+		ExtraHeaders: map[string]string{"X-Source": "ttadk"},
+	}, PromptInput{})
+	if err != nil {
+		t.Fatalf("Decide returned error: %v", err)
+	}
+	if decision.Action != "fold" || decision.Amount != 0 {
+		t.Fatalf("unexpected decision: %+v", decision)
+	}
+}

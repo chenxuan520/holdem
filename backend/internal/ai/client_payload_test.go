@@ -131,3 +131,51 @@ func TestBuildRequestPayloadMergesExtraBody(t *testing.T) {
 		t.Fatalf("extra_body merge dropped messages")
 	}
 }
+
+func TestBuildRequestPayloadAllowsExtraBodyToDeleteDefaults(t *testing.T) {
+	preset := config.Preset{
+		Model:            "gpt-5.2-codex",
+		StructuredOutput: config.StructuredOutputToolCall,
+		ExtraBody:        map[string]any{"temperature": nil, "top_p": 0.2},
+	}
+	payload := buildRequestPayload(preset, PromptInput{}, 1, "")
+	if _, ok := payload["temperature"]; ok {
+		t.Fatalf("expected extra_body nil to delete temperature, got %+v", payload)
+	}
+	if payload["top_p"] != 0.2 {
+		t.Fatalf("expected extra_body to add top_p, got %+v", payload)
+	}
+}
+
+func TestBuildProbePayloadUsesCompactPromptAndMergesExtraBody(t *testing.T) {
+	preset := config.Preset{
+		Model:            "kimi-k2.5",
+		StructuredOutput: config.StructuredOutputJSONObject,
+		ExtraBody:        map[string]any{"temperature": nil, "thinking": map[string]any{"type": "disabled"}},
+	}
+	payload := buildProbePayload(preset)
+	if _, ok := payload["temperature"]; ok {
+		t.Fatalf("expected probe payload to omit deleted temperature, got %+v", payload)
+	}
+	if payload["max_tokens"] != 16 {
+		t.Fatalf("expected default probe max_tokens 16, got %+v", payload["max_tokens"])
+	}
+	messages, ok := payload["messages"].([]map[string]string)
+	if !ok || len(messages) != 1 || messages[0]["content"] != "Reply with exactly pong." {
+		t.Fatalf("expected compact deterministic probe prompt, got %+v", payload["messages"])
+	}
+	if _, ok := payload["response_format"]; ok {
+		t.Fatalf("expected probe payload to skip structured-output forcing, got %+v", payload["response_format"])
+	}
+	thinking, ok := payload["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("expected probe payload to merge extra_body, got %+v", payload["thinking"])
+	}
+}
+
+func TestBuildProbePayloadCapsHighPresetMaxTokens(t *testing.T) {
+	payload := buildProbePayload(config.Preset{Model: "glm-5.1", MaxTokens: 512})
+	if payload["max_tokens"] != 128 {
+		t.Fatalf("expected high preset max_tokens to be capped at 128 for probe, got %+v", payload["max_tokens"])
+	}
+}

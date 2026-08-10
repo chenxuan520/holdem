@@ -117,6 +117,12 @@
   - python `JSONDecoder().raw_decode()` 容忍 ttadk 注入 JSON 尾部多出来的 `}`。
 - **绝对不要**把 sniff 出来的 apiKey / `at-` token 贴到 commit message、PR 描
   述、agent log、replay JSON 里——这些 token 仍是有效凭证。
+- **GPT-5.5 @NADK 使用独立 token**：preset id 是 `gpt-5-5-nadk`，endpoint 是
+  `https://llmbox.bytedance.net/v1`，不能拿 TTADK 的 token 替代。刷新流程：
+  `nadk auth login && holdem-apply-nadk-token config/ai-presets.yaml`，然后重启后端。
+  - `~/.local/bin/holdem-apply-nadk-token` 只更新这一条 preset，且不打印凭证。
+  - YAML 中该 token **故意加双引号**；这样上面的 TTADK `--apply` 正则不会误覆盖
+    NADK 凭证。不要为了“统一格式”去掉引号。
 
 ## AI 擂台 / 排行榜（前端「擂台排行」标签）
 
